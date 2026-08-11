@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
 import { User } from 'src/modules/user/schema/user.schema';
-import { MessageType } from 'src/common/enums/chat/messageType';
+// import { MessageType } from 'src/common/enums/chat/messageType';
 
 export type ChatMessageDocument = HydratedDocument<ChatMessage>;
 
@@ -36,11 +36,11 @@ export class ChatMessage {
   })
   message: string;
 
-  @Prop({
-    enum: MessageType,
-    default: MessageType.TEXT,
-  })
-  messageType: MessageType;
+  // @Prop({
+  //   enum: MessageType,
+  //   default: MessageType.TEXT,
+  // })
+  // messageType: MessageType;
 
   @Prop({
     default: false,

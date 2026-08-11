@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsMongoId, IsString } from 'class-validator';
-import { MessageType } from 'src/common/enums/chat/messageType';
+// import { MessageType } from 'src/common/enums/chat/messageType';
 
 export class SendMessageDto {
   @ApiProperty()
@@ -11,11 +11,11 @@ export class SendMessageDto {
   @IsString()
   message: string;
 
-  @ApiProperty({
-    enum: MessageType,
-    required: false,
-    default: MessageType.TEXT,
-  })
-  @IsEnum(MessageType)
-  messageType: MessageType = MessageType.TEXT;
+  // @ApiProperty({
+  //   enum: MessageType,
+  //   required: false,
+  //   default: MessageType.TEXT,
+  // })
+  // @IsEnum(MessageType)
+  // messageType: MessageType = MessageType.TEXT;
 }
