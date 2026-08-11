@@ -98,13 +98,6 @@ export const Msg = {
   DRIVER_NOT_ASSIGNED: 'Driver not assigned',
   DRIVERS_FETCHED: 'Drivers fetched successfully',
 
-  // Ride type
-  RIDE_TYPE_CREATED: 'Ride type created successfully',
-  RIDE_TYPE_FETCHED: 'Ride types fetched successfully',
-  RIDE_TYPE_UPDATED: 'Ride type updated successfully',
-  RIDE_TYPE_DELETED: 'Ride type deleted successfully',
-  RIDE_TYPE_NOT_FOUND: 'Ride type not found',
-
   // Route
   ROUTE_NOT_FOUND: 'Route not found',
   ROUTE_CREATED: 'Route created successfully',
@@ -121,35 +114,6 @@ export const Msg = {
   LOCATION_NOT_FOUND: 'Location not found',
   LOCATION_DELETED: 'Location deleted successfully',
   LOCATION_CREATED: 'Location created successfully',
-
-  // Ride
-  RIDE_BOOKED: 'Ride booked successfully',
-  RIDE_FETCHED: 'Ride fetched successfully',
-  RIDES_FETCHED: 'Rides fetched successfully',
-  RIDES_NOT_FOUND: 'No Rides Found',
-  RIDE_NOT_COMPLETED: 'Ride not completed',
-  RIDE_UPDATED: 'Ride updated successfully',
-  RIDE_DELETED: 'Ride deleted successfully',
-  RIDE_ALREADY_ACCEPTED: 'Ride already accepted',
-  RIDE_ACCEPTED: 'Ride accepted successfully',
-  RIDE_CANCELLED: 'Ride cancelled successfully',
-  RIDE_ALREADY_CANCELLED: 'Ride already cancelled',
-  RIDE_ALREADY_COMPLETED: 'Ride already completed',
-  RIDE_NOT_FOUND: 'Ride not found',
-  ACTIVE_RIDE_EXISTS: 'You already have an active ride',
-  NO_ACTIVE_RIDES_FOUND: 'No active rides found',
-  NO_RIDES_FOUND_NEARBY: 'No rides found nearby',
-  RIDE_STATUS_UPDATED_SUCCESSFULLY: 'Ride status updated successfully.',
-  RIDE_NOT_ASSIGNED_TO_DRIVER: 'Ride is not assigned to this driver.',
-  DRIVER_CAN_ONLY_ARRIVE_AFTER_ACCEPTING_THE_RIDE:
-    'Driver can only arrive after accepting the ride.',
-  RIDE_CAN_ONLY_START_AFTER_DRIVER_ARRIVES:
-    'Ride can only start after driver arrives.',
-  RIDE_MUST_BE_ONGOING_BEFORE_REQUESTING_PAYMENT:
-    'Ride must be ongoing before requesting payment.',
-  RIDE_COMPLETION_HANDLED_AFTER_SUCCESSFUL_PAYMENT:
-    'Ride completion is handled after successful payment.',
-  INVALID_RIDE_STATUS: 'Invalid ride status.',
 
   // Chat
   CHAT_JOINED: 'Chat joined successfully',
@@ -185,13 +149,4 @@ export const Msg = {
   // SuperAdmin
   DRIVER_VERIFIED: 'Driver verified successfully',
   DRIVER_REJECTED: 'Driver rejected successfully',
-
-  // Company
-  COMPANY_REGISTERED: 'Company registered successfully',
-  COMPANY_EXISTS: 'Company with this email already exists',
-  COMPANY_NOT_FOUND: 'Company not found',
-  COMPANY_PROFILE_FETCHED: 'Company profile fetched successfully',
-  COMPANY_CARS_FETCHED: 'Company cars fetched successfully',
-  NO_CARS_FOUND: 'No cars found for this company',
-  CAR_NOT_FOUND: 'Car not found',
 };
