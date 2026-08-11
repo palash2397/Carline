@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
-import { Ride } from 'src/modules/ride/schema/ride.schema';
 import { User } from 'src/modules/user/schema/user.schema';
 import { MessageType } from 'src/common/enums/chat/messageType';
 
@@ -10,12 +9,12 @@ export type ChatMessageDocument = HydratedDocument<ChatMessage>;
   timestamps: true,
 })
 export class ChatMessage {
-  @Prop({
-    type: mongoose.Schema.Types.ObjectId,
-    ref: Ride.name,
-    required: true,
-  })
-  ride: mongoose.Types.ObjectId;
+  // @Prop({
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: Ride.name,
+  //   required: true,
+  // })
+  // ride: mongoose.Types.ObjectId;
 
   @Prop({
     type: mongoose.Schema.Types.ObjectId,

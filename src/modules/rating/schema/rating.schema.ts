@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
-import { Ride } from 'src/modules/ride/schema/ride.schema';
+
 import { User } from 'src/modules/user/schema/user.schema';
 import { RatingFor } from 'src/common/enums/driver/rating-enum';
 
@@ -10,12 +10,12 @@ export type RatingDocument = HydratedDocument<Rating>;
   timestamps: true,
 })
 export class Rating {
-  @Prop({
-    type: mongoose.Schema.Types.ObjectId,
-    ref: Ride.name,
-    required: true,
-  })
-  ride: mongoose.Types.ObjectId;
+  // @Prop({
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: Ride.name,
+  //   required: true,
+  // })
+  // ride: mongoose.Types.ObjectId;
 
   @Prop({
     type: mongoose.Schema.Types.ObjectId,

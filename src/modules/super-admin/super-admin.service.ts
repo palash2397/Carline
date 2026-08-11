@@ -4,7 +4,6 @@ import { Model } from 'mongoose';
 
 import { User, UserDocument } from '../user/schema/user.schema';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
-import { Company, CompanyDocument } from '../company/schema/company.schema';
 
 import { ApiResponse } from 'src/helpers/ApiResponse';
 import { Msg } from 'src/helpers/responseMsg';
@@ -25,8 +24,6 @@ export class SuperAdminService {
     private readonly userModel: Model<UserDocument>,
     @InjectModel(Driver.name)
     private readonly driverModel: Model<DriverDocument>,
-    @InjectModel(Company.name)
-    private readonly companyModel: Model<CompanyDocument>,
   ) {}
 
   async login(dto: SuperAdminLoginDto) {
@@ -224,60 +221,6 @@ export class SuperAdminService {
       );
     } catch (error) {
       console.log(`error while changing the driver status`, error);
-      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
-    }
-  }
-
-  async changeCompanyStatus(id: string) {
-    try {
-      const company = await this.companyModel.findOne({ _id: id });
-      if (!company) {
-        return new ApiResponse(404, {}, Msg.COMPANY_NOT_FOUND);
-      }
-
-      company.isVerified = company.isVerified ? false : true;
-      await company.save();
-
-      return new ApiResponse(
-        200,
-        { company },
-        company.isVerified
-          ? 'Company verified successfully'
-          : 'Company unverified successfully',
-      );
-    } catch (error) {
-      console.log(`error while changing the company status`, error);
-      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
-    }
-  }
-
-  async allCompanies() {
-    try {
-      const company = await this.companyModel
-        .find({})
-        .select('-password')
-        .lean();
-      if (!company || company.length == 0) {
-        return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
-      }
-
-      const baseUrl = process.env.BASE_URL || '';
-      const formattedCompanies = company.map((company: any) => {
-        if (company.documents && company.documents.length > 0) {
-          company.documents = company.documents.map(
-            (doc: string) => `${baseUrl}/api/v1/uploads/company/${doc}`,
-          );
-        }
-        return company;
-      });
-
-      return new ApiResponse(
-        200,
-        { companies: formattedCompanies },
-        Msg.DATA_FETCHED,
-      );
-    } catch (error) {
-      console.log(`error while fetching companies`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

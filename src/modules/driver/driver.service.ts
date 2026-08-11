@@ -8,7 +8,6 @@ import { deleteOldFile } from 'src/helpers/index';
 
 import { Driver, DriverDocument } from './schema/driver.schema';
 import { User, UserDocument } from 'src/modules/user/schema/user.schema';
-import { Ride, RideDocument } from '../ride/schema/ride.schema';
 
 import { UpdateDriverBasicDetailsDto } from './dto/update-driver-basic-details.dto';
 import { UpdateDriverLocationDto } from './dto/update-driver-location.dto';
@@ -21,7 +20,6 @@ export class DriverService {
   constructor(
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
-    @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
     private readonly socketService: SocketService,
   ) {}
 
@@ -282,74 +280,6 @@ export class DriverService {
     } catch (error) {
       console.log('Error updating driver documents:', error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
-    }
-  }
-
-  async updateDriverLocation(userId: string, dto: UpdateDriverLocationDto) {
-    try {
-      const driver = await this.driverModel.findOneAndUpdate(
-        {
-          user: userId,
-          isOnline: true,
-        },
-        {
-          currentLocation: {
-            type: 'Point',
-            coordinates: [dto.longitude, dto.latitude],
-          },
-        },
-        {
-          new: true,
-        },
-      );
-
-      if (!driver) {
-        return {
-          success: false,
-          message: Msg.DRIVER_NOT_ONLINE,
-        };
-      }
-
-      const ride = await this.rideModel.findOne({
-        driver: driver._id,
-        status: {
-          $in: [
-            RideStatus.DRIVER_FOUND,
-            RideStatus.DRIVER_ARRIVED,
-            RideStatus.ONGOING,
-          ],
-        },
-      });
-
-      console.log('Ride User:', ride?.user.toString());
-      console.log('Driver User:', userId);
-      console.log('Ride Id:', ride?._id);
-
-      if (ride) {
-        this.socketService.emitToUser(
-          ride.user.toString(),
-          'driverLocationUpdated',
-          {
-            rideId: ride._id,
-            latitude: dto.latitude,
-            longitude: dto.longitude,
-          },
-        );
-      } else {
-        console.log('NO ACTIVE RIDE');
-      }
-
-      return {
-        success: true,
-        message: Msg.LOCATION_UPDATED,
-      };
-    } catch (error) {
-      console.log('error while updating driver location', error);
-
-      return {
-        success: false,
-        message: Msg.SERVER_ERROR,
-      };
     }
   }
 }

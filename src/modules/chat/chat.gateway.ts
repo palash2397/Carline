@@ -24,19 +24,19 @@ export class ChatGateway {
 
   constructor(private readonly chatService: ChatService) {}
 
-  @SubscribeMessage('joinRideChat')
-  async joinRideChat(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() dto: JoinChatDto,
-  ) {
-    return this.chatService.joinRideChat(client, dto);
-  }
+  // @SubscribeMessage('joinRideChat')
+  // async joinRideChat(
+  //   @ConnectedSocket() client: Socket,
+  //   @MessageBody() dto: JoinChatDto,
+  // ) {
+  //   return this.chatService.joinRideChat(client, dto);
+  // }
 
-  @SubscribeMessage('sendMessage')
-  async sendMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() dto: SendMessageDto,
-  ) {
-    return this.chatService.sendMessage(client, dto, this.server);
-  }
+  // @SubscribeMessage('sendMessage')
+  // async sendMessage(
+  //   @ConnectedSocket() client: Socket,
+  //   @MessageBody() dto: SendMessageDto,
+  // ) {
+  //   return this.chatService.sendMessage(client, dto, this.server);
+  // }
 }

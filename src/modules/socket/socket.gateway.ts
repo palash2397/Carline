@@ -16,7 +16,6 @@ import { Server, Socket } from 'socket.io';
 import { SocketService } from './socket.service';
 
 import { DriverService } from '../driver/driver.service';
-import { UpdateDriverLocationDto } from '../driver/dto/update-driver-location.dto';
 
 @WebSocketGateway({
   path: '/viamo/socket.io',
@@ -100,21 +99,21 @@ export class SocketGateway
     };
   }
 
-  @SubscribeMessage('driverLocation')
-  async driverLocation(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: UpdateDriverLocationDto,
-  ) {
-    console.log('driverLocation event received');
-    console.log('user:', client.data.user);
-    console.log('location data:', data);
+  // @SubscribeMessage('driverLocation')
+  // async driverLocation(
+  //   @ConnectedSocket() client: Socket,
+  //   @MessageBody() data: UpdateDriverLocationDto,
+  // ) {
+  //   console.log('driverLocation event received');
+  //   console.log('user:', client.data.user);
+  //   console.log('location data:', data);
 
-    const userId = client.data.user.id;
+  //   const userId = client.data.user.id;
 
-    const result = await this.driverService.updateDriverLocation(userId, data);
+  //   const result = await this.driverService.updateDriverLocation(userId, data);
 
-    console.log('location update result:', result);
+  //   console.log('location update result:', result);
 
-    return result;
-  }
+  //   return result;
+  // }
 }
