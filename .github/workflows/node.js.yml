@@ -1,4 +1,4 @@
-name: biipbiip CI/CD
+name: carline CI/CD
 
 on:
   push:
@@ -34,11 +34,11 @@ jobs:
       - name: Add Node & PM2 to PATH
         run: echo "/home/nodeteam/.local/share/fnm/node-versions/v22.21.1/installation/bin" >> $GITHUB_PATH
 
-      - name: run biipbiip backend
+      - name: run carline backend
         run: npm run build
 
       - name: Run backend
         run: |
-          pm2 delete biipbiip-backend || true
-          pm2 start dist/main.js --name biipbiip-backend
+          pm2 delete carline-backend || true
+          pm2 start dist/main.js --name carline-backend
           pm2 save
