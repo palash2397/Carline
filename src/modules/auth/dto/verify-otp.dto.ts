@@ -3,18 +3,11 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class VerifyOtpDto {
   @ApiProperty({
-    example: '+91',
+    example: 'johndoe@yopmail.com',
   })
   @IsString()
   @IsNotEmpty()
-  countryCode: string;
-
-  @ApiProperty({
-    example: '9876543210',
-  })
-  @IsString()
-  @IsNotEmpty()
-  phoneNumber: string;
+  email: string;
 
   @ApiProperty({
     example: '9999',

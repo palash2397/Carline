@@ -12,6 +12,7 @@ import { UserRegisterDto } from './dto/user-register.dto';
 
 import { getOtpEmailTemplate } from 'src/modules/mail/template/otp.template';
 import { MailService } from 'src/modules/mail/mail.service';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 
 @Injectable()
 export class AuthService {
@@ -61,6 +62,38 @@ export class AuthService {
       );
     } catch (error) {
       console.log('error while user registration', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async verifyOtp(dto: VerifyOtpDto) {
+    try {
+      const checkUser = await this.userModel.findOne({ email: dto.email });
+      if (!checkUser) {
+        return new ApiResponse(400, {}, Msg.USER_NOT_FOUND);
+      }
+
+      if (checkUser.isVerified) {
+        return new ApiResponse(400, {}, Msg.USER_ALREADY_VERIFIED);
+      }
+
+      if (!checkUser.otp || !checkUser.otpExpireAt) {
+        return new ApiResponse(400, {}, Msg.OTP_INVALID);
+      }
+
+      if (checkUser.otp !== dto.otp || new Date() > checkUser.otpExpireAt) {
+        return new ApiResponse(400, {}, Msg.OTP_INVALID);
+      }
+
+      checkUser.isVerified = true;
+      checkUser.otp = undefined;
+      checkUser.otpExpireAt = undefined;
+
+      await checkUser.save();
+
+      return new ApiResponse(200, {}, Msg.OTP_VERIFIED);
+    } catch (error) {
+      console.log(`error while verifying the otp`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
