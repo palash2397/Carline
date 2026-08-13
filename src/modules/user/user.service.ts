@@ -54,10 +54,17 @@ export class UserService {
         return new ApiResponse(404, {}, Msg.USER_NOT_FOUND);
       }
 
+      const updateData: any = {};
+      Object.keys(dto).forEach((key) => {
+        if (dto[key as keyof UpdateProfileDto] !== '') {
+          updateData[key] = dto[key as keyof UpdateProfileDto];
+        }
+      });
+
       const updatedUser = await this.userModel.findOneAndUpdate(
         { _id: user._id },
-        { ...dto, user: user._id },
-        { new: true, upsert: true },
+        { $set: updateData },
+        { new: true },
       );
 
       if (!updatedUser) {
@@ -81,7 +88,19 @@ export class UserService {
         ? `${process.env.BASE_URL}/api/v1/uploads/profile/${updatedUser.avatar}`
         : process.env.DEFAULT_IMAGE;
 
-      return new ApiResponse(200, updatedUser, Msg.USER_UPDATED);
+      const data = {
+        _id: updatedUser._id,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        phoneNumber: updatedUser.phoneNumber,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        avatar: updatedUser.avatar,
+        gender: updatedUser.gender,
+        dob: updatedUser.dob,
+      };
+
+      return new ApiResponse(200, data, Msg.USER_UPDATED);
     } catch (error) {
       console.log('error while updating profile', error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
