@@ -13,6 +13,7 @@ import { UserRegisterDto } from './dto/user-register.dto';
 import { getOtpEmailTemplate } from 'src/modules/mail/template/otp.template';
 import { MailService } from 'src/modules/mail/mail.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ResendOtpDto } from './dto/resend-otp.dto';
 
 @Injectable()
 export class AuthService {
@@ -94,6 +95,42 @@ export class AuthService {
       return new ApiResponse(200, {}, Msg.OTP_VERIFIED);
     } catch (error) {
       console.log(`error while verifying the otp`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async resendOtp(dto: ResendOtpDto) {
+    try {
+      const checkUser = await this.userModel.findOne({ email: dto.email });
+      if (!checkUser) {
+        return new ApiResponse(400, {}, Msg.USER_NOT_FOUND);
+      }
+
+      if (checkUser.isVerified) {
+        return new ApiResponse(400, {}, Msg.USER_ALREADY_VERIFIED);
+      }
+
+      const otp = generateOtp();
+      const otpExpiresAt = getExpirationTime();
+
+      console.log('otp', otp);
+      console.log('otpExpiresAt', otpExpiresAt);
+
+      checkUser.otp = otp;
+      checkUser.otpExpireAt = otpExpiresAt;
+
+      await checkUser.save();
+
+      await this.mailService.sendEmail(
+        dto.email,
+        'OTP Verification',
+        `Your OTP is ${otp}`,
+        getOtpEmailTemplate(otp, checkUser.firstName),
+      );
+
+      return new ApiResponse(200, {}, Msg.OTP_RESENT);
+    } catch (error) {
+      console.log(`error while resending the otp`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
