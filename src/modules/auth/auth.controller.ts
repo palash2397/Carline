@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
+import { LoginUserDto } from './dto/login-user.dto';
 
 import { UserRegisterDto } from './dto/user-register.dto';
 
@@ -26,6 +27,11 @@ export class AuthController {
   @Post('/resend-otp')
   resendOtp(@Body() dto: ResendOtpDto) {
     return this.authService.resendOtp(dto);
+  }
+
+  @Post('/login')
+  login(@Body() dto: LoginUserDto) {
+    return this.authService.login(dto);
   }
 
   // @Post('/sendOtp')
