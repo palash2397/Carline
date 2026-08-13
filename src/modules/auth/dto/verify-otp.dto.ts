@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class VerifyOtpDto {
@@ -10,9 +10,17 @@ export class VerifyOtpDto {
   email: string;
 
   @ApiProperty({
-    example: '9999',
+    example: '999999',
   })
   @IsString()
   @IsNotEmpty()
   otp: string;
+
+  @ApiProperty({
+    example: 'verify',
+  })
+  @IsString()
+  @IsEnum(['password'])
+  @IsOptional()
+  type: string;
 }

@@ -127,7 +127,7 @@ export class UserService {
 
       user.otp = otp;
       user.otpExpireAt = otpExpiry;
-      user.isPasswordReset = true;
+      // user.isPasswordReset = true;
       await user.save();
       await this.mailService.sendEmail(
         email,
@@ -156,6 +156,9 @@ export class UserService {
       if (isPasswordValid) {
         return new ApiResponse(400, {}, Msg.ENTERED_OLD_PASSWORD);
       }
+
+      console.log('user.isPasswordReset', user.isPasswordReset);
+      console.log('typeof user.isPasswordReset', typeof user.isPasswordReset);
 
       if (!user.isPasswordReset) {
         return new ApiResponse(400, {}, Msg.OTP_INVALID);

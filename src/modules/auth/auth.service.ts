@@ -88,6 +88,16 @@ export class AuthService {
         return new ApiResponse(400, {}, Msg.OTP_INVALID);
       }
 
+      if (dto.type === 'password') {
+        checkUser.isPasswordReset = true;
+        checkUser.otp = undefined;
+        checkUser.otpExpireAt = undefined;
+
+        await checkUser.save();
+
+        return new ApiResponse(200, {}, Msg.OTP_VERIFIED);
+      }
+
       checkUser.isVerified = true;
       checkUser.otp = undefined;
       checkUser.otpExpireAt = undefined;
