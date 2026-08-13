@@ -18,6 +18,16 @@ export class AuthController {
     return this.authService.userRegister(dto);
   }
 
+  @Post('/verifyOtp')
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyOtp(dto);
+  }
+
+  @Post('/resendOtp')
+  resendOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.resendOtp(dto);
+  }
+
   // @Post('/sendOtp')
   // sendOtp(@Body() dto: SendOtpDto) {
   //   return this.authService.sendOtp(dto);
