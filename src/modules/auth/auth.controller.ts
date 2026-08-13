@@ -3,10 +3,8 @@ import { ApiTags } from '@nestjs/swagger';
 
 import { AuthService } from './auth.service';
 
-import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
-import { SuperAdminLoginDto } from './dto/superadmin-login.dto';
 
 @ApiTags('Auth')
 @Controller('auth')

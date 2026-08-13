@@ -47,11 +47,11 @@ export class User {
   password?: string;
 
   @Prop({
-    type: [String],
+    type: String,
     enum: UserRole,
-    default: [],
+    default: UserRole.USER,
   })
-  roles: UserRole[];
+  role: UserRole;
 
   @Prop({
     type: String,

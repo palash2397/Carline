@@ -9,7 +9,7 @@ import {
   Patch,
 } from '@nestjs/common';
 import { SuperAdminService } from './super-admin.service';
-import { SuperAdminLoginDto } from '../auth/dto/superadmin-login.dto';
+
 import { DriverStatusDto } from './dto/driver-status.dto';
 import { CompanyStatusDto } from './dto/company-status.dto';
 
@@ -25,8 +25,8 @@ import { UserRole } from 'src/common/enums/user/role.enum';
 export class SuperAdminController {
   constructor(private readonly superAdminService: SuperAdminService) {}
 
-  @Post('/login')
-  login(@Body() dto: SuperAdminLoginDto) {
-    return this.superAdminService.login(dto);
-  }
+  // @Post('/login')
+  // login(@Body() dto: SuperAdminLoginDto) {
+  //   return this.superAdminService.login(dto);
+  // }
 }
