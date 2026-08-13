@@ -8,14 +8,17 @@ import { generateOtp, getExpirationTime } from 'src/helpers/index';
 import { Msg } from 'src/helpers/responseMsg';
 
 import { User, UserDocument } from 'src/modules/user/schema/user.schema';
-
 import { UserRegisterDto } from './dto/user-register.dto';
+
+import { getOtpEmailTemplate } from 'src/modules/mail/template/otp.template';
+import { MailService } from 'src/modules/mail/mail.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    private readonly mailService: MailService,
   ) {}
 
   async userRegister(dto: UserRegisterDto) {
@@ -41,6 +44,13 @@ export class AuthService {
         otp,
         otpExpireAt: otpExpiry,
       });
+
+      await this.mailService.sendEmail(
+        dto.email,
+        'OTP Verification',
+        `Your OTP is ${otp}`,
+        getOtpEmailTemplate(otp, dto.firstName),
+      );
 
       return new ApiResponse(
         200,

@@ -4,7 +4,7 @@ export const getOtpEmailTemplate = (otp: string, userName: string = 'User') => `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OTP Verification - Car Trading</title>
+    <title>OTP Verification - Carline</title>
     <style>
         body {
             font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -80,13 +80,13 @@ export const getOtpEmailTemplate = (otp: string, userName: string = 'User') => `
 <body>
     <div class="container">
         <div class="header">
-            <h1>Car Trading</h1>
+            <h1>Carline</h1>
         </div>
         <div class="content">
             <div class="icon">🚗</div>
             <h2>Verify Your Account</h2>
             <p>Hello <strong>${userName}</strong>,</p>
-            <p>Thank you for choosing Car Trading. To complete your registration and hit the road with us, please use the verification code below:</p>
+            <p>Thank you for choosing Carline. To complete your registration and hit the road with us, please use the verification code below:</p>
             
             <div class="otp-container">
                 <p class="otp-code"><strong>${otp}</strong></p>
@@ -97,7 +97,7 @@ export const getOtpEmailTemplate = (otp: string, userName: string = 'User') => `
             <p class="warning">If you did not request this verification, you can safely ignore this email.</p>
         </div>
         <div class="footer">
-            <p><strong>&copy; ${new Date().getFullYear()} Car Trading. All rights reserved.</strong></p>
+            <p><strong>&copy; ${new Date().getFullYear()} Carline. All rights reserved.</strong></p>
             <p><strong>123 Automotive Blvd, Motor City</strong></p>
         </div>
     </div>
