@@ -64,7 +64,6 @@ export class UserService {
         return new ApiResponse(404, {}, Msg.USER_NOT_FOUND);
       }
 
-      updatedUser.isProfileCompleted = true;
       await updatedUser.save();
 
       console.log(`updated user ----------->`, updatedUser);

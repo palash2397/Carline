@@ -7,8 +7,6 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ChatMessage, ChatMessageSchema } from './schema/chat-message.schema';
 import { User, UserSchema } from 'src/modules/user/schema/user.schema';
 
-import { Driver, DriverSchema } from 'src/modules/driver/schema/driver.schema';
-
 import { SocketModule } from 'src/modules/socket/socket.module';
 
 @Module({
@@ -17,7 +15,6 @@ import { SocketModule } from 'src/modules/socket/socket.module';
     MongooseModule.forFeature([
       { name: ChatMessage.name, schema: ChatMessageSchema },
       { name: User.name, schema: UserSchema },
-      { name: Driver.name, schema: DriverSchema },
     ]),
   ],
   controllers: [ChatController],

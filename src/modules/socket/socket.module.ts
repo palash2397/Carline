@@ -5,9 +5,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { SocketGateway } from './socket.gateway';
 import { SocketService } from './socket.service';
 
-import { Driver, DriverSchema } from '../driver/schema/driver.schema';
 import { User, UserSchema } from '../user/schema/user.schema';
-import { DriverModule } from '../driver/driver.module';
 
 @Global()
 @Module({
@@ -20,12 +18,7 @@ import { DriverModule } from '../driver/driver.module';
         name: User.name,
         schema: UserSchema,
       },
-      {
-        name: Driver.name,
-        schema: DriverSchema,
-      },
     ]),
-    forwardRef(() => DriverModule),
   ],
   providers: [SocketGateway, SocketService],
   exports: [SocketService],

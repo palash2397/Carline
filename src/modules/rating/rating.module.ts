@@ -4,14 +4,12 @@ import { RatingController } from './rating.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Rating, RatingSchema } from './schema/rating.schema';
 import { User, UserSchema } from '../user/schema/user.schema';
-import { Driver, DriverSchema } from '../driver/schema/driver.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Rating.name, schema: RatingSchema },
       { name: User.name, schema: UserSchema },
-      { name: Driver.name, schema: DriverSchema },
     ]),
   ],
   controllers: [RatingController],

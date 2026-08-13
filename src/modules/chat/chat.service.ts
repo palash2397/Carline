@@ -5,10 +5,6 @@ import { Socket, Server } from 'socket.io';
 
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
 
-import {
-  Driver,
-  DriverDocument,
-} from 'src/modules/driver/schema/driver.schema';
 import { User, UserDocument } from 'src/modules/user/schema/user.schema';
 import { ChatMessage, ChatMessageDocument } from './schema/chat-message.schema';
 
@@ -21,9 +17,6 @@ import { Msg } from 'src/helpers/responseMsg';
 @Injectable()
 export class ChatService {
   constructor(
-    @InjectModel(Driver.name)
-    private readonly driverModel: Model<DriverDocument>,
-
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
 

@@ -29,25 +29,4 @@ export class SuperAdminController {
   login(@Body() dto: SuperAdminLoginDto) {
     return this.superAdminService.login(dto);
   }
-
-  @Get('/all/drivers')
-  @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RoleGuard)
-  getAllDrivers() {
-    return this.superAdminService.allDrivers();
-  }
-
-  @Get('/driver/:id')
-  @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RoleGuard)
-  getDriverById(@Param('id') id: string) {
-    return this.superAdminService.driverById(id);
-  }
-
-  @Patch('/driver/update/status')
-  @ApiBearerAuth('access-token')
-  @UseGuards(JwtAuthGuard, RoleGuard)
-  updateDriverStatus(@Body() dto: DriverStatusDto) {
-    return this.superAdminService.approveOrRejectDriver(dto);
-  }
 }

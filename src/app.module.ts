@@ -8,7 +8,6 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AddressModule } from './modules/address/address.module';
 import { FaqModule } from './modules/faq/faq.module';
 import { SupportModule } from './modules/support/support.module';
-import { DriverModule } from './modules/driver/driver.module';
 import { SocketModule } from './modules/socket/socket.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { RatingModule } from './modules/rating/rating.module';
@@ -25,7 +24,6 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
     AddressModule,
     FaqModule,
     SupportModule,
-    DriverModule,
     SocketModule,
     ChatModule,
     RatingModule,

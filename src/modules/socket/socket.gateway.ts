@@ -15,8 +15,6 @@ import { Server, Socket } from 'socket.io';
 
 import { SocketService } from './socket.service';
 
-import { DriverService } from '../driver/driver.service';
-
 @WebSocketGateway({
   path: '/viamo/socket.io',
   cors: {
@@ -32,8 +30,6 @@ export class SocketGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly socketService: SocketService,
-    @Inject(forwardRef(() => DriverService))
-    private readonly driverService: DriverService,
   ) {}
 
   afterInit(server: Server) {

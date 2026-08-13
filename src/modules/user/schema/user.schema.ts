@@ -24,13 +24,6 @@ export class User {
 
   @Prop({
     type: String,
-    trim: true,
-    default: null,
-  })
-  countryCode: string;
-
-  @Prop({
-    type: String,
     required: true,
     unique: true,
     index: true,
@@ -96,11 +89,11 @@ export class User {
   })
   otpExpireAt?: Date;
 
-  @Prop({
-    type: Boolean,
-    default: false,
-  })
-  isProfileCompleted: boolean;
+  // @Prop({
+  //   type: Boolean,
+  //   default: false,
+  // })
+  // isProfileCompleted: boolean;
 
   @Prop({
     type: Boolean,

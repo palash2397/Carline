@@ -4,7 +4,6 @@ import { Model } from 'mongoose';
 
 import { Rating, RatingDocument } from './schema/rating.schema';
 import { User, UserDocument } from '../user/schema/user.schema';
-import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 
 // import { UserRole } from 'src/common/enums/user/role.enum';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
@@ -23,8 +22,5 @@ export class RatingService {
 
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
-
-    @InjectModel(Driver.name)
-    private readonly driverModel: Model<DriverDocument>,
   ) {}
 }
