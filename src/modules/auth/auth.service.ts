@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import jwt from 'jsonwebtoken';
+import * as bcrypt from 'bcrypt';
 
 import { ApiResponse } from 'src/helpers/ApiResponse';
 import { generateOtp, getExpirationTime } from 'src/helpers/index';
@@ -14,6 +15,7 @@ import { getOtpEmailTemplate } from 'src/modules/mail/template/otp.template';
 import { MailService } from 'src/modules/mail/mail.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
+import { LoginUserDto } from './dto/login-user.dto';
 
 @Injectable()
 export class AuthService {
@@ -131,6 +133,55 @@ export class AuthService {
       return new ApiResponse(200, {}, Msg.OTP_RESENT);
     } catch (error) {
       console.log(`error while resending the otp`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async login(dto: LoginUserDto) {
+    try {
+      const userData = await this.userModel
+        .findOne({ email: dto.email })
+        .select('+password');
+      if (!userData) {
+        return new ApiResponse(400, {}, Msg.INVALID_CREDENTIALS);
+      }
+
+      if (!userData.isActive) {
+        return new ApiResponse(400, {}, Msg.ACCOUNT_DEACTIVATED);
+      }
+
+      if (!userData.isVerified) {
+        return new ApiResponse(400, {}, Msg.USER_NOT_VERIFIED);
+      }
+
+      const isPasswordValid = await bcrypt.compare(
+        dto.password,
+        userData?.password!,
+      );
+      // console.log('isPasswordValid', isPasswordValid);
+      if (!isPasswordValid) {
+        return new ApiResponse(401, {}, Msg.INVALID_CREDENTIALS);
+      }
+
+      const token = jwt.sign(
+        { id: userData._id, roles: userData.role },
+        process.env.JWT_SECRET!,
+        {
+          expiresIn: '10d',
+        },
+      );
+
+      const userDataResponse = {
+        _id: userData._id,
+        name: userData.firstName + ' ' + userData.lastName,
+        email: userData.email,
+        roles: userData.role,
+        token,
+      };
+
+      return new ApiResponse(200, userDataResponse, Msg.LOGIN_SUCCESS);
+    } catch (error) {
+      console.log(`error while logging in`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

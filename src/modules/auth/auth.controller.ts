@@ -18,12 +18,12 @@ export class AuthController {
     return this.authService.userRegister(dto);
   }
 
-  @Post('/verifyOtp')
+  @Post('/verify-otp')
   verifyOtp(@Body() dto: VerifyOtpDto) {
     return this.authService.verifyOtp(dto);
   }
 
-  @Post('/resendOtp')
+  @Post('/resend-otp')
   resendOtp(@Body() dto: ResendOtpDto) {
     return this.authService.resendOtp(dto);
   }
