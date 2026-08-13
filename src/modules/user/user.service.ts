@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as bcrypt from 'bcrypt';
 
 import { ApiResponse } from 'src/helpers/ApiResponse';
 import {
@@ -10,14 +11,21 @@ import {
 } from 'src/helpers/index';
 
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+
+import { getOtpEmailTemplate } from '../mail/template/otp.template';
+
 import { Msg } from 'src/helpers/responseMsg';
 import { User, UserDocument } from './schema/user.schema';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class UserService {
   constructor(
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    private readonly mailService: MailService,
   ) {}
 
   async myProfile(userId: string) {
@@ -103,6 +111,65 @@ export class UserService {
       return new ApiResponse(200, data, Msg.USER_UPDATED);
     } catch (error) {
       console.log('error while updating profile', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    try {
+      const { email } = dto;
+      const user = await this.userModel.findOne({ email });
+      if (!user) {
+        return new ApiResponse(404, {}, Msg.USER_NOT_FOUND);
+      }
+      const otp = generateOtp();
+      const otpExpiry = getExpirationTime();
+
+      user.otp = otp;
+      user.otpExpireAt = otpExpiry;
+      user.isPasswordReset = true;
+      await user.save();
+      await this.mailService.sendEmail(
+        email,
+        'Forgot Password',
+        `Your OTP is ${otp}`,
+        getOtpEmailTemplate(otp, user.firstName),
+      );
+
+      return new ApiResponse(200, {}, Msg.OTP_SENT);
+    } catch (error) {
+      console.log('error while forgot password', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    try {
+      const { email, password } = dto;
+
+      const user = await this.userModel.findOne({ email });
+      if (!user) {
+        return new ApiResponse(404, {}, Msg.USER_NOT_FOUND);
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, user.password!);
+      if (isPasswordValid) {
+        return new ApiResponse(400, {}, Msg.ENTERED_OLD_PASSWORD);
+      }
+
+      if (!user.isPasswordReset) {
+        return new ApiResponse(400, {}, Msg.OTP_INVALID);
+      }
+
+      user.password = password!;
+      user.otp = undefined;
+      user.otpExpireAt = undefined;
+      user.isPasswordReset = false;
+      await user.save();
+
+      return new ApiResponse(200, {}, Msg.PASSWORD_CHANGED);
+    } catch (error) {
+      console.log('error while resetting password', error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
