@@ -12,6 +12,7 @@ import { SocketModule } from './modules/socket/socket.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { RatingModule } from './modules/rating/rating.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
+import { MailModule } from './modules/mail/mail.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
     ChatModule,
     RatingModule,
     SuperAdminModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [],

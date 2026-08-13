@@ -6,10 +6,17 @@ import { AuthService } from './auth.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 
+import { UserRegisterDto } from './dto/user-register.dto';
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Post('/register')
+  userRegister(@Body() dto: UserRegisterDto) {
+    return this.authService.userRegister(dto);
+  }
 
   // @Post('/sendOtp')
   // sendOtp(@Body() dto: SendOtpDto) {
