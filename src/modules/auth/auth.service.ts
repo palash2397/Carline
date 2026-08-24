@@ -33,7 +33,11 @@ export class AuthService {
         $or: [{ email }, { phoneNumber }],
       });
       if (existingUser) {
-        return new ApiResponse(400, {}, Msg.USER_EXISTS);
+        if (existingUser.email === dto.email) {
+          return new ApiResponse(400, {}, Msg.USER_EXISTS_EMAIL);
+        } else if (existingUser.phoneNumber === dto.phoneNumber) {
+          return new ApiResponse(400, {}, Msg.USER_EXISTS_PHONE);
+        }
       }
 
       const otp = generateOtp();

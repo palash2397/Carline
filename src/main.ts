@@ -51,7 +51,7 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // // WebSocket Adapter
+  // WebSocket Adapter
   app.useWebSocketAdapter(new IoAdapter(app));
 
   // Global Prefix

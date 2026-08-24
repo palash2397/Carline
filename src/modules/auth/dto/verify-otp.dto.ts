@@ -20,7 +20,7 @@ export class VerifyOtpDto {
     example: 'verify',
   })
   @IsString()
-  @IsEnum(['password'])
+  @IsEnum(['password', 'verify'])
   @IsOptional()
   type: string;
 }

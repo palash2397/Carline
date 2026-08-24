@@ -9,6 +9,8 @@ export const Msg = {
   USER_REGISTER: `User registered successfully`,
   USER_LOGIN: `User logged in successfully`,
   USER_EXISTS: `User already exists`,
+  USER_EXISTS_EMAIL: `User already exists with this email`,
+  USER_EXISTS_PHONE: `User already exists with this phone number`,
   USER_ALREADY_VERIFIED: `User Already verified`,
   USER_NOT_VERIFIED: `User not verified`,
   USER_NOT_FOUND: `User not found`,
