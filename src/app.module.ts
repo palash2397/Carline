@@ -13,6 +13,7 @@ import { RatingModule } from './modules/rating/rating.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { MailModule } from './modules/mail/mail.module';
 import { DriverModule } from './modules/driver/driver.module';
+import { CustomerModule } from './modules/customer/customer.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { DriverModule } from './modules/driver/driver.module';
     SuperAdminModule,
     MailModule,
     DriverModule,
+    CustomerModule,
   ],
   controllers: [AppController],
   providers: [],
