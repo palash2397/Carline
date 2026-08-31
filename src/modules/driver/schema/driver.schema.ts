@@ -62,7 +62,6 @@ export class Driver {
   @Prop()
   queueTimeStatus: string;
 
-  // UI Specific Fields
   @Prop({ type: Date })
   lastTripTaken: Date;
 

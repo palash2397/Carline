@@ -42,4 +42,25 @@ export class DriverService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async createDriver(dto: any) {
+    try {
+      const lastDriver = await this.driverModel
+        .findOne()
+        .sort({ driverId: -1 });
+      const newDriverId =
+        lastDriver && lastDriver.driverId ? lastDriver.driverId + 1 : 1;
+
+      const newDriver = new this.driverModel({
+        ...dto,
+        driverId: newDriverId,
+      });
+
+      await newDriver.save();
+
+      return new ApiResponse(201, newDriver, 'Driver created successfully');
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
 }
