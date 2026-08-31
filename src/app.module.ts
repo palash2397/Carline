@@ -12,6 +12,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { RatingModule } from './modules/rating/rating.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { MailModule } from './modules/mail/mail.module';
+import { DriverModule } from './modules/driver/driver.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MailModule } from './modules/mail/mail.module';
     RatingModule,
     SuperAdminModule,
     MailModule,
+    DriverModule,
   ],
   controllers: [AppController],
   providers: [],
