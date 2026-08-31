@@ -36,7 +36,7 @@ export class DriverService {
       return new ApiResponse(
         200,
         { data, total, page, limit },
-        Msg.FETCH_SUCCESS,
+        Msg.DATA_FETCHED,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
