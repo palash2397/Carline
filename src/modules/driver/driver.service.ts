@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Driver, DriverDocument } from './schema/driver.schema';
 import { ApiResponse } from '../../helpers/ApiResponse';
+import { Msg } from 'src/helpers/responseMsg';
 
 @Injectable()
 export class DriverService {
@@ -26,11 +27,19 @@ export class DriverService {
       }
 
       const total = await this.driverModel.countDocuments(searchFilter);
-      const data = await this.driverModel.find(searchFilter).skip(skip).limit(limit).exec();
+      const data = await this.driverModel
+        .find(searchFilter)
+        .skip(skip)
+        .limit(limit)
+        .exec();
 
-      return new ApiResponse(200, { data, total, page, limit }, 'Drivers fetched successfully');
+      return new ApiResponse(
+        200,
+        { data, total, page, limit },
+        Msg.FETCH_SUCCESS,
+      );
     } catch (error) {
-      return new ApiResponse(500, {}, error.message);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
 }

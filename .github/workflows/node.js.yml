@@ -40,5 +40,5 @@ jobs:
       - name: Run backend
         run: |
           pm2 delete carline-backend || true
-          pm2 start dist/main.js --name carline-backend
+          pm2 start dist/src/main.js --name carline-backend
           pm2 save

@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { ApiResponse } from 'src/helpers/ApiResponse';
 import { ROLES_KEY } from './roles.decorator';
 import { UserRole } from 'src/common/enums/user/role.enum';
+import { Msg } from 'src/helpers/responseMsg';
 
 @Injectable()
 export class RoleGuard implements CanActivate {
@@ -27,18 +28,19 @@ export class RoleGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
-    if (!user || !user.roles || !Array.isArray(user.roles)) {
-      throw new ForbiddenException(
-        new ApiResponse(403, {}, 'Access is forbidden'),
-      );
+    console.log(user);
+
+    if (!user || !user.roles) {
+      throw new ForbiddenException(new ApiResponse(403, {}, Msg.FORBIDDEN));
     }
 
-    const hasRole = requiredRoles.some((role) => user.roles.includes(role));
+    // Convert string roles (like "ADMIN") from JWT into an array
+    const userRoles = Array.isArray(user.roles) ? user.roles : [user.roles];
+
+    const hasRole = requiredRoles.some((role) => userRoles.includes(role));
 
     if (!hasRole) {
-      throw new ForbiddenException(
-        new ApiResponse(403, {}, 'Access is forbidden'),
-      );
+      throw new ForbiddenException(new ApiResponse(403, {}, Msg.FORBIDDEN));
     }
 
     return true;
