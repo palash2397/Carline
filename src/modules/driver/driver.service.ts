@@ -63,4 +63,22 @@ export class DriverService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async updateDriver(id: string, dto: any) {
+    try {
+      const updatedDriver = await this.driverModel.findByIdAndUpdate(
+        id,
+        { $set: dto },
+        { new: true, runValidators: true }
+      );
+
+      if (!updatedDriver) {
+        return new ApiResponse(404, {}, 'Driver not found');
+      }
+
+      return new ApiResponse(200, updatedDriver, 'Driver updated successfully');
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
 }
