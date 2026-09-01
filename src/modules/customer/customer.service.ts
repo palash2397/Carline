@@ -43,4 +43,26 @@ export class CustomerService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async findOrCreateCustomer(phone: string, name?: string) {
+    let customer = await this.customerModel.findOne({ mobileNumber: phone });
+    if (!customer) {
+      // Find the highest customerId to auto-increment
+      const lastCustomer = await this.customerModel.findOne().sort({ customerId: -1 });
+      const newCustomerId = lastCustomer && lastCustomer.customerId ? lastCustomer.customerId + 1 : 1;
+
+      customer = new this.customerModel({
+        customerId: newCustomerId,
+        mobileNumber: phone,
+        accountNumber: phone,
+        fullName: name || 'New IVR Customer',
+        autoEmail: 'Inactive',
+        credit: 0,
+        createdBy: 'IVR_SYSTEM',
+        createdOn: new Date().toLocaleString(),
+      });
+      await customer.save();
+    }
+    return customer;
+  }
 }

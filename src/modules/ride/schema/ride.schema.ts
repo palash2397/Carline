@@ -64,6 +64,9 @@ export class Ride {
 
   @Prop()
   rideCompleteDateTime: string;
+
+  @Prop()
+  recordingUrl: string;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);
