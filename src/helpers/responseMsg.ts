@@ -4,10 +4,12 @@ export const Msg = {
   SUCCESS: `Success`,
   VALIDATION_ERROR: `Validation failed`,
   BAD_REQUEST: `Bad request`,
+  INVALID_INPUT: `Input not understood`,
 
   // User
   USER_REGISTER: `User registered successfully`,
   USER_LOGIN: `User logged in successfully`,
+  USER_LOGGED_OUT: `User logged out successfully`,
   USER_EXISTS: `User already exists`,
   USER_EXISTS_EMAIL: `User already exists with this email`,
   USER_EXISTS_PHONE: `User already exists with this phone number`,
@@ -99,6 +101,7 @@ export const Msg = {
   DRIVER_NOT_FOUND: 'Driver not found',
   DRIVER_NOT_ASSIGNED: 'Driver not assigned',
   DRIVERS_FETCHED: 'Drivers fetched successfully',
+  DRIVER_UNRECOGNIZED: 'Unrecognized driver',
 
   // Route
   ROUTE_NOT_FOUND: 'Route not found',
@@ -151,4 +154,15 @@ export const Msg = {
   // SuperAdmin
   DRIVER_VERIFIED: 'Driver verified successfully',
   DRIVER_REJECTED: 'Driver rejected successfully',
+
+  // Ride
+  RIDE_NOT_FOUND: 'Ride not found',
+  RIDE_ACCEPTED: 'Ride accepted successfully',
+  RIDE_STARTED: 'Ride started successfully',
+  RIDE_COMPLETED: 'Ride completed successfully',
+  RIDE_CANCELLED: 'Ride cancelled successfully',
+  RIDE_ASSIGNED: 'Ride assigned successfully',
+  RIDE_NOT_ACCEPTED: 'Ride not accepted successfully',
+  RIDE_ASSIGNED_TO_YOU: 'Ride assigned successfully to you',
+  RIDE_ALREADY_ASSIGNED: 'Ride already assigned successfully',
 };
