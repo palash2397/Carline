@@ -15,6 +15,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { DriverModule } from './modules/driver/driver.module';
 import { CustomerModule } from './modules/customer/customer.module';
 import { RideModule } from './modules/ride/ride.module';
+import { IvrModule } from './modules/ivr/ivr.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { RideModule } from './modules/ride/ride.module';
     DriverModule,
     CustomerModule,
     RideModule,
+    IvrModule,
   ],
   controllers: [AppController],
   providers: [],

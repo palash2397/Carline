@@ -88,6 +88,22 @@ export class Driver {
 
   @Prop({ default: 'Enabled' })
   archiveStatus: string;
+
+  // IVR Dispatch Specific Fields
+  @Prop({ type: Number, default: 1 })
+  batch: number; // 1, 2, or 3
+
+  @Prop({ type: Boolean, default: false })
+  isLoggedIn: boolean;
+
+  @Prop({ type: String, default: 'BOTH' }) // LOCAL, LONG_DISTANCE, BOTH
+  queueType: string;
+
+  @Prop({ type: Boolean, default: false })
+  isAvailable: boolean;
+
+  @Prop({ type: String, default: null })
+  activeRideId: string;
 }
 
 export const DriverSchema = SchemaFactory.createForClass(Driver);

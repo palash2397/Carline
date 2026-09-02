@@ -67,6 +67,9 @@ export class Ride {
 
   @Prop()
   recordingUrl: string;
+
+  @Prop()
+  driverId: string;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);
