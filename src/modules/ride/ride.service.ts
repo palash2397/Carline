@@ -131,7 +131,20 @@ export class RideService {
         // In a real system, you might want to handle this differently.
       }
 
-      return new ApiResponse(201, { tripNumber, rideId: newRideId, batchSizes: { b1: batch1.length, b2: batch2.length, b3: batch3.length } }, 'Ride created and dispatched');
+      return new ApiResponse(201, { 
+        tripNumber, 
+        rideId: newRideId, 
+        batches: { 
+          batch1: batch1, 
+          batch2: batch2, 
+          batch3: batch3 
+        },
+        batchSizes: { 
+          b1: batch1.length, 
+          b2: batch2.length, 
+          b3: batch3.length 
+        } 
+      }, 'Ride created and dispatched');
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }

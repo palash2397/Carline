@@ -27,6 +27,10 @@ export class IvrService {
     if (driver.activeRideId) {
       const activeRide = await this.rideModel.findById(driver.activeRideId);
       
+      if (!activeRide) {
+        return new ApiResponse(404, {}, 'Active ride not found');
+      }
+      
       if (!dto.dtmfInput) {
         // Just calling in, no input yet. Tell Python what menu to play.
         if (activeRide.rideStatus === 'ACCEPTED') {
@@ -42,15 +46,15 @@ export class IvrService {
           return new ApiResponse(200, { action: 'SAY_STARTED' }, 'Ride started');
         } else if (activeRide.rideStatus === 'ACCEPTED' && dto.dtmfInput === '3') {
           activeRide.rideStatus = 'PENDING'; // Or CANCELLED based on business logic
-          activeRide.driverId = null;
-          driver.activeRideId = null;
+          activeRide.driverId = '';
+          driver.activeRideId = '';
           driver.isAvailable = true;
           await activeRide.save();
           await driver.save();
           return new ApiResponse(200, { action: 'SAY_CANCELLED' }, 'Ride cancelled');
         } else if (activeRide.rideStatus === 'STARTED' && dto.dtmfInput === '2') {
           activeRide.rideStatus = 'COMPLETED';
-          driver.activeRideId = null;
+          driver.activeRideId = '';
           driver.isAvailable = true;
           await activeRide.save();
           await driver.save();
@@ -100,7 +104,8 @@ export class IvrService {
       }
 
       // Lock successful
-      driver.activeRideId = (await this.rideModel.findOne({ tripNumber: dto.tripNumber }))._id.toString();
+      const trip = await this.rideModel.findOne({ tripNumber: dto.tripNumber });
+      driver.activeRideId = trip ? trip._id.toString() : '';
       driver.isAvailable = false;
       await driver.save();
 
