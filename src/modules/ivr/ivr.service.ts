@@ -53,6 +53,7 @@ export class IvrService {
           dto.dtmfInput === '1'
         ) {
           activeRide.rideStatus = RideStatus.STARTED;
+          activeRide.rideStartDateTime = new Date().toISOString();
           await activeRide.save();
           return new ApiResponse(
             200,
@@ -78,9 +79,9 @@ export class IvrService {
           activeRide.rideStatus === RideStatus.STARTED &&
           dto.dtmfInput === '2'
         ) {
-          activeRide.rideStatus = RideStatus.COMPLETED;
-          driver.activeRideId = '';
-          driver.isAvailable = true;
+          activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+          activeRide.rideCompleteDateTime = new Date().toISOString();
+          // We keep the driver locked to the trip until payment is done
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
@@ -190,6 +191,73 @@ export class IvrService {
         },
         'Online batches fetched successfully'
       );
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async getDriverStatus(mobileNumber: string) {
+    try {
+      const driver = await this.driverModel.findOne({ mobileNumber });
+      
+      if (!driver) {
+        return new ApiResponse(404, { registered: false }, Msg.DRIVER_NOT_FOUND);
+      }
+
+      let workflowStage = 'NO_ACTIVE_TRIP';
+      let activeTripData: any = null;
+
+      if (driver.activeRideId) {
+        const ride = await this.rideModel.findById(driver.activeRideId);
+        if (ride) {
+          if (ride.rideStatus === RideStatus.ACCEPTED) {
+            workflowStage = 'ASSIGNED_NOT_STARTED';
+            activeTripData = {
+              tripId: ride._id,
+              tripNumber: ride.tripNumber
+            };
+          } else if (ride.rideStatus === RideStatus.STARTED) {
+            workflowStage = 'IN_PROGRESS';
+            activeTripData = {
+              tripId: ride._id,
+              tripNumber: ride.tripNumber
+            };
+          } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
+            workflowStage = 'AWAITING_PAYMENT';
+            
+            let durationMinutes = 0;
+            if (ride.rideStartDateTime && ride.rideCompleteDateTime) {
+              const start = new Date(ride.rideStartDateTime).getTime();
+              const end = new Date(ride.rideCompleteDateTime).getTime();
+              durationMinutes = Math.ceil((end - start) / 60000); 
+            }
+            
+            const calculatedFare = durationMinutes * 0.50;
+            
+            activeTripData = {
+              tripId: ride._id,
+              tripNumber: ride.tripNumber,
+              durationMinutes,
+              calculatedFare,
+              finalFare: calculatedFare,
+              currency: 'USD'
+            };
+          }
+        }
+      }
+
+      return new ApiResponse(200, {
+        registered: true,
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        phoneNumber: driver.mobileNumber,
+        loggedIn: driver.isLoggedIn,
+        serviceType: driver.queueType,
+        available: driver.isAvailable,
+        workflowStage,
+        activeTrip: activeTripData
+      }, 'Driver status fetched');
+
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }

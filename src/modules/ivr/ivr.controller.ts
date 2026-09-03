@@ -1,4 +1,12 @@
-import { Body, Controller, Post, UseGuards, Get, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+  Get,
+  Query,
+  Param,
+} from '@nestjs/common';
 import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
@@ -28,5 +36,10 @@ export class IvrController {
   @Get('/batches')
   async getOnlineBatches(@Query('queueType') queueType: string) {
     return this.ivrService.getOnlineBatches(queueType);
+  }
+
+  @Get('/driver/status/:number')
+  async getDriverStatus(@Param('number') number: string) {
+    return this.ivrService.getDriverStatus(number);
   }
 }
