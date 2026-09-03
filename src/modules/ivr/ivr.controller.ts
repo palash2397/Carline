@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards, Get, Query } from '@nestjs/common';
 import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
@@ -23,5 +23,10 @@ export class IvrController {
   @Post('/dispatch/action')
   async handleDispatchAction(@Body() dto: IvrDispatchActionDto) {
     return this.ivrService.processDispatchAction(dto);
+  }
+
+  @Get('/batches')
+  async getOnlineBatches(@Query('queueType') queueType: string) {
+    return this.ivrService.getOnlineBatches(queueType);
   }
 }

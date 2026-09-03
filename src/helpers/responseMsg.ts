@@ -165,4 +165,5 @@ export const Msg = {
   RIDE_NOT_ACCEPTED: 'Ride not accepted successfully',
   RIDE_ASSIGNED_TO_YOU: 'Ride assigned successfully to you',
   RIDE_ALREADY_ASSIGNED: 'Ride already assigned successfully',
+  RIDE_BOOKED: 'Ride booked successfully',
 };

@@ -165,6 +165,36 @@ export class IvrService {
     return new ApiResponse(200, { action: 'HANGUP' }, Msg.RIDE_NOT_ACCEPTED);
   }
 
+  async getOnlineBatches(queueType?: string) {
+    try {
+      const query: any = {
+        isLoggedIn: true,
+        isAvailable: true,
+      };
+
+      if (queueType) {
+        query.queueType = { $in: [queueType, 'BOTH'] };
+      }
+
+      const eligibleDrivers = await this.driverModel.find(query);
+
+      const batch1 = eligibleDrivers.filter(d => d.batch === 1).map(d => d.mobileNumber);
+      const batch2 = eligibleDrivers.filter(d => d.batch === 2).map(d => d.mobileNumber);
+      const batch3 = eligibleDrivers.filter(d => d.batch === 3).map(d => d.mobileNumber);
+
+      return new ApiResponse(
+        200,
+        {
+          batches: { batch1, batch2, batch3 },
+          batchSizes: { b1: batch1.length, b2: batch2.length, b3: batch3.length },
+        },
+        'Online batches fetched successfully'
+      );
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
   private async cancelOtherCalls(tripNumber: string) {
     const pythonUrl = process.env.PYTHON_IVR_URL || 'http://localhost:5000';
     try {

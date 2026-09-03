@@ -69,7 +69,7 @@ export class DriverService {
       const updatedDriver = await this.driverModel.findByIdAndUpdate(
         id,
         { $set: dto },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
 
       if (!updatedDriver) {

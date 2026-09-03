@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { DriverService } from './driver.service';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 
@@ -18,9 +28,24 @@ export class DriverController {
 
   @Get('/all')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number for pagination (e.g. 1)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Number of items per page (e.g. 10)' })
-  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search term to filter results' })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (e.g. 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (e.g. 10)',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search term to filter results',
+  })
   async getDrivers(@Query() query: any) {
     return this.driverService.getDrivers(query);
   }

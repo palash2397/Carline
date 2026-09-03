@@ -77,11 +77,16 @@ export class RideService {
 
       await newRide.save();
 
-      return new ApiResponse(201, { tripNumber, rideId: newRideId }, 'IVR Ride booked successfully');
+      return new ApiResponse(
+        201,
+        { tripNumber, rideId: newRideId },
+        'IVR Ride booked successfully',
+      );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
   async adminDispatch(dto: AdminDispatchDto) {
     try {
       const customer = await this.customerService.findOrCreateCustomer(
@@ -104,47 +109,53 @@ export class RideService {
 
       await newRide.save();
 
-      // Find eligible drivers
       const eligibleDrivers = await this.driverModel.find({
         isLoggedIn: true,
         isAvailable: true,
-        queueType: { $in: [dto.queueName, 'BOTH'] }
+        queueType: { $in: [dto.queueName, 'BOTH'] },
       });
 
-      const batch1 = eligibleDrivers.filter(d => d.batch === 1).map(d => d.mobileNumber);
-      const batch2 = eligibleDrivers.filter(d => d.batch === 2).map(d => d.mobileNumber);
-      const batch3 = eligibleDrivers.filter(d => d.batch === 3).map(d => d.mobileNumber);
+      const batch1 = eligibleDrivers
+        .filter((d) => d.batch === 1)
+        .map((d) => d.mobileNumber);
+      const batch2 = eligibleDrivers
+        .filter((d) => d.batch === 2)
+        .map((d) => d.mobileNumber);
+      const batch3 = eligibleDrivers
+        .filter((d) => d.batch === 3)
+        .map((d) => d.mobileNumber);
 
-      // Send to Python AI
       const pythonUrl = process.env.PYTHON_IVR_URL || 'http://localhost:5000';
-      
+
       try {
         await axios.post(`${pythonUrl}/api/call-batch`, {
           tripNumber,
           batch1,
           batch2,
-          batch3
+          batch3,
         });
       } catch (err) {
         console.error('Failed to contact Python IVR system', err.message);
-        // We do not fail the request if python is down, we just log it.
-        // In a real system, you might want to handle this differently.
       }
 
-      return new ApiResponse(201, { 
-        tripNumber, 
-        rideId: newRideId, 
-        batches: { 
-          batch1: batch1, 
-          batch2: batch2, 
-          batch3: batch3 
+      return new ApiResponse(
+        201,
+        {
+          tripNumber,
+          rideId: newRideId,
+          batches: {
+            batch1: batch1,
+            batch2: batch2,
+            batch3: batch3,
+          },
+          batchSizes: {
+            b1: batch1.length,
+            b2: batch2.length,
+            b3: batch3.length,
+          },
         },
-        batchSizes: { 
-          b1: batch1.length, 
-          b2: batch2.length, 
-          b3: batch3.length 
-        } 
-      }, 'Ride created and dispatched');
+        Msg.RIDE_BOOKED,
+      );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
