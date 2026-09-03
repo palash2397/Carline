@@ -7,11 +7,6 @@ export class BookIvrRideDto {
   @IsString()
   queueName?: string;
 
-  @ApiProperty({ example: 'John Driver' })
-  @IsOptional()
-  @IsString()
-  driverName?: string;
-
   @ApiProperty({ example: '8887776665' })
   @IsOptional()
   @IsString()

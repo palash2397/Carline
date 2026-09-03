@@ -12,7 +12,7 @@ import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
 import { IvrService } from './ivr.service';
 
-@ApiTags('IVR Webhooks (Python -> NestJS)')
+@ApiTags('IVR Webhooks')
 @Controller('ivr')
 @UseGuards(ApiKeyGuard)
 @ApiHeader({

@@ -8,6 +8,8 @@ import { CustomerService } from '../customer/customer.service';
 import { BookIvrRideDto } from './dto/book-ivr-ride.dto';
 import { AdminDispatchDto } from './dto/admin-dispatch.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
+import { RideStatus } from 'src/common/enums/ride/ride-enum';
+
 import axios from 'axios';
 
 @Injectable()
@@ -62,16 +64,23 @@ export class RideService {
       const lastRide = await this.rideModel.findOne().sort({ rideId: -1 });
       const newRideId = lastRide && lastRide.rideId ? lastRide.rideId + 1 : 1;
 
+      const driverData = await this.driverModel.findOne({
+        mobileNumber: dto.driverNumber,
+      });
+      if (!driverData) {
+        return new ApiResponse(400, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
       const newRide = new this.rideModel({
         rideId: newRideId,
         customerNumber: dto.customerNumber,
         customerName: customer.fullName,
         queueName: dto.queueName,
-        driverName: dto.driverName,
+        driverName: driverData.driverName,
         driverNumber: dto.driverNumber,
         recordingUrl: dto.recordingUrl,
         rideStartDateTime: dto.rideStart,
-        rideStatus: 'PENDING',
+        rideStatus: RideStatus.PENDING,
         tripNumber: tripNumber,
       });
 
