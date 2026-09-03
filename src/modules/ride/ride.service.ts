@@ -86,11 +86,7 @@ export class RideService {
 
       await newRide.save();
 
-      return new ApiResponse(
-        201,
-        { tripNumber, rideId: newRideId },
-        'IVR Ride booked successfully',
-      );
+      return new ApiResponse(201, { newRide }, Msg.RIDE_BOOKED);
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
