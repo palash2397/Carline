@@ -179,17 +179,39 @@ export class IvrService {
 
       const eligibleDrivers = await this.driverModel.find(query);
 
-      const batch1 = eligibleDrivers.filter(d => d.batch === 1).map(d => d.mobileNumber);
-      const batch2 = eligibleDrivers.filter(d => d.batch === 2).map(d => d.mobileNumber);
-      const batch3 = eligibleDrivers.filter(d => d.batch === 3).map(d => d.mobileNumber);
+      const mapDriver = (d: DriverDocument) => ({
+        driverId: d.driverId,
+        mobileNumber: d.mobileNumber,
+      });
+
+      const batch1Drivers = eligibleDrivers.filter((d) => d.batch === 1).map(mapDriver);
+      const batch2Drivers = eligibleDrivers.filter((d) => d.batch === 2).map(mapDriver);
+      const batch3Drivers = eligibleDrivers.filter((d) => d.batch === 3).map(mapDriver);
 
       return new ApiResponse(
         200,
         {
-          batches: { batch1, batch2, batch3 },
-          batchSizes: { b1: batch1.length, b2: batch2.length, b3: batch3.length },
+          batches: {
+            batch1: {
+              startAfterSeconds: 0,
+              drivers: batch1Drivers,
+            },
+            batch2: {
+              startAfterSeconds: 15,
+              drivers: batch2Drivers,
+            },
+            batch3: {
+              startAfterSeconds: 25,
+              drivers: batch3Drivers,
+            },
+          },
+          batchSizes: {
+            b1: batch1Drivers.length,
+            b2: batch2Drivers.length,
+            b3: batch3Drivers.length,
+          },
         },
-        'Online batches fetched successfully'
+        'Online batches fetched successfully',
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
