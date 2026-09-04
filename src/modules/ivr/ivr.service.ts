@@ -309,10 +309,36 @@ export class IvrService {
       let workflowStage = 'NO_ACTIVE_TRIP';
       let activeTripData: any = null;
 
-      if (driver.activeRideId) {
-        const ride = await this.rideModel.findById(driver.activeRideId);
+      let ride = driver.activeRideId
+        ? await this.rideModel.findById(driver.activeRideId)
+        : null;
+
+      // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
+      if (!ride) {
+        ride = await this.rideModel.findOne({
+          $or: [
+            { driverId: driver._id.toString() },
+            { driverNumber: driver.mobileNumber },
+          ],
+          rideStatus: {
+            $in: [
+              RideStatus.ACCEPTED,
+              RideStatus.STARTED,
+              RideStatus.PAYMENT_PENDING,
+            ],
+          },
+        }).sort({ createdAt: -1 });
+
+        // Auto-sync driver record if active ride is found
         if (ride) {
-          if (ride.rideStatus === RideStatus.ACCEPTED) {
+          driver.activeRideId = ride._id.toString();
+          driver.isAvailable = false;
+          await driver.save();
+        }
+      }
+
+      if (ride) {
+        if (ride.rideStatus === RideStatus.ACCEPTED) {
             workflowStage = 'ASSIGNED_NOT_STARTED';
             activeTripData = {
               tripId: ride._id,
@@ -346,7 +372,6 @@ export class IvrService {
             };
           }
         }
-      }
 
       return new ApiResponse(200, {
         registered: true,
