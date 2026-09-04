@@ -14,10 +14,15 @@ export class IvrDriverActionDto {
 }
 
 export class IvrDispatchActionDto {
-  @ApiProperty({ example: 'TRIP-123456' })
-  @IsNotEmpty()
+  @ApiProperty({ example: 'customer-0426bfae-09fe-4258-9af8-b003e0114b07', required: false })
+  @IsOptional()
   @IsString()
-  tripNumber: string;
+  dispatchId?: string;
+
+  @ApiProperty({ example: 'TRIP-123456', required: false })
+  @IsOptional()
+  @IsString()
+  tripNumber?: string;
 
   @ApiProperty({ example: '1234567890' })
   @IsNotEmpty()

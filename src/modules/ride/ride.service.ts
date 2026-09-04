@@ -64,29 +64,41 @@ export class RideService {
       const lastRide = await this.rideModel.findOne().sort({ rideId: -1 });
       const newRideId = lastRide && lastRide.rideId ? lastRide.rideId + 1 : 1;
 
-      const driverData = await this.driverModel.findOne({
-        mobileNumber: dto.driverNumber,
-      });
-      if (!driverData) {
-        return new ApiResponse(400, {}, Msg.DRIVER_NOT_FOUND);
+      let driverData: DriverDocument | null = null;
+      if (dto.driverNumber) {
+        driverData = await this.driverModel.findOne({
+          mobileNumber: dto.driverNumber,
+        });
+        if (!driverData) {
+          return new ApiResponse(400, {}, Msg.DRIVER_NOT_FOUND);
+        }
       }
+
+      const initialStatus = driverData ? RideStatus.ACCEPTED : RideStatus.PENDING;
 
       const newRide = new this.rideModel({
         rideId: newRideId,
         customerNumber: dto.customerNumber,
         customerName: customer.fullName,
         queueName: dto.queueName,
-        driverName: driverData.driverName,
-        driverNumber: dto.driverNumber,
+        driverName: driverData ? driverData.driverName : '',
+        driverNumber: dto.driverNumber || '',
+        driverId: driverData ? driverData._id.toString() : '',
         recordingUrl: dto.recordingUrl,
         rideStartDateTime: dto.rideStart,
-        rideStatus: RideStatus.PENDING,
+        rideStatus: initialStatus,
         tripNumber: tripNumber,
       });
 
       await newRide.save();
 
-      return new ApiResponse(201, { newRide }, Msg.RIDE_BOOKED);
+      if (driverData) {
+        driverData.activeRideId = newRide._id.toString();
+        driverData.isAvailable = false;
+        await driverData.save();
+      }
+
+      return new ApiResponse(201, { newRide, tripNumber }, Msg.RIDE_BOOKED);
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }

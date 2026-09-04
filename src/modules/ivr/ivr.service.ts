@@ -125,45 +125,124 @@ export class IvrService {
     return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
   }
 
+  private dispatchLocks = new Map<string, { driverNumber: string; acceptedAt: Date }>();
+
   async processDispatchAction(dto: IvrDispatchActionDto) {
     const driver = await this.driverModel.findOne({
       mobileNumber: dto.driverNumber,
     });
     if (!driver) return new ApiResponse(403, {}, Msg.DRIVER_NOT_FOUND);
 
-    if (dto.dtmfInput === '1') {
-      const result = await this.rideModel.updateOne(
-        { tripNumber: dto.tripNumber, rideStatus: RideStatus.PENDING },
-        {
-          $set: {
-            rideStatus: RideStatus.ACCEPTED,
-            driverId: driver._id.toString(),
-          },
-        },
-      );
+    if (!dto.dispatchId && !dto.tripNumber) {
+      return new ApiResponse(400, {}, 'Either dispatchId or tripNumber is required');
+    }
 
-      if (result.modifiedCount === 0) {
+    // --- PRE-BOOKING DISPATCH FLOW (Using dispatchId) ---
+    if (dto.dispatchId) {
+      if (dto.dtmfInput === '1') {
+        const existingLock = this.dispatchLocks.get(dto.dispatchId);
+        if (existingLock) {
+          if (existingLock.driverNumber === dto.driverNumber) {
+            return new ApiResponse(
+              200,
+              { action: 'SAY_ACCEPTED' },
+              Msg.RIDE_ASSIGNED_TO_YOU,
+            );
+          } else {
+            return new ApiResponse(
+              400,
+              { action: 'SAY_ALREADY_ASSIGNED' },
+              Msg.RIDE_ALREADY_ASSIGNED,
+            );
+          }
+        }
+
+        // Acquire lock for this driver
+        this.dispatchLocks.set(dto.dispatchId, {
+          driverNumber: dto.driverNumber,
+          acceptedAt: new Date(),
+        });
+
+        this.cleanupDispatchLocks();
+        this.cancelOtherCalls(dto.dispatchId).catch(console.error);
+
         return new ApiResponse(
-          400,
-          { action: 'SAY_ALREADY_ASSIGNED' },
-          Msg.RIDE_ALREADY_ASSIGNED,
+          200,
+          { action: 'SAY_ACCEPTED' },
+          Msg.RIDE_ASSIGNED_TO_YOU,
+        );
+      } else if (dto.dtmfInput === '2') {
+        return new ApiResponse(
+          200,
+          { action: 'SAY_REJECTED' },
+          Msg.RIDE_NOT_ACCEPTED,
+        );
+      } else if (dto.dtmfInput === '0') {
+        return new ApiResponse(
+          200,
+          { action: 'SAY_REPLAY' },
+          'Replay requested',
         );
       }
-      const trip = await this.rideModel.findOne({ tripNumber: dto.tripNumber });
-      driver.activeRideId = trip ? trip._id.toString() : '';
-      driver.isAvailable = false;
-      await driver.save();
+    }
 
-      this.cancelOtherCalls(dto.tripNumber).catch(console.error);
+    // --- POST-BOOKING DISPATCH FLOW (Using tripNumber) ---
+    if (dto.tripNumber) {
+      if (dto.dtmfInput === '1') {
+        const result = await this.rideModel.updateOne(
+          { tripNumber: dto.tripNumber, rideStatus: RideStatus.PENDING },
+          {
+            $set: {
+              rideStatus: RideStatus.ACCEPTED,
+              driverId: driver._id.toString(),
+            },
+          },
+        );
 
-      return new ApiResponse(
-        200,
-        { action: 'SAY_ACCEPTED' },
-        Msg.RIDE_ASSIGNED_TO_YOU,
-      );
+        if (result.modifiedCount === 0) {
+          return new ApiResponse(
+            400,
+            { action: 'SAY_ALREADY_ASSIGNED' },
+            Msg.RIDE_ALREADY_ASSIGNED,
+          );
+        }
+        const trip = await this.rideModel.findOne({ tripNumber: dto.tripNumber });
+        driver.activeRideId = trip ? trip._id.toString() : '';
+        driver.isAvailable = false;
+        await driver.save();
+
+        this.cancelOtherCalls(dto.tripNumber).catch(console.error);
+
+        return new ApiResponse(
+          200,
+          { action: 'SAY_ACCEPTED' },
+          Msg.RIDE_ASSIGNED_TO_YOU,
+        );
+      } else if (dto.dtmfInput === '2') {
+        return new ApiResponse(
+          200,
+          { action: 'SAY_REJECTED' },
+          Msg.RIDE_NOT_ACCEPTED,
+        );
+      } else if (dto.dtmfInput === '0') {
+        return new ApiResponse(
+          200,
+          { action: 'SAY_REPLAY' },
+          'Replay requested',
+        );
+      }
     }
 
     return new ApiResponse(200, { action: 'HANGUP' }, Msg.RIDE_NOT_ACCEPTED);
+  }
+
+  private cleanupDispatchLocks() {
+    const now = Date.now();
+    for (const [key, lock] of this.dispatchLocks.entries()) {
+      if (now - lock.acceptedAt.getTime() > 30 * 60 * 1000) {
+        this.dispatchLocks.delete(key);
+      }
+    }
   }
 
   async getOnlineBatches(queueType?: string) {
