@@ -46,6 +46,12 @@ export class DriverController {
     type: String,
     description: 'Search term to filter results',
   })
+  @ApiQuery({
+    name: 'batch',
+    required: false,
+    type: Number,
+    description: 'Filter drivers by batch number (e.g. 1, 2, 3)',
+  })
   async getDrivers(@Query() query: any) {
     return this.driverService.getDrivers(query);
   }

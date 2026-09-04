@@ -26,6 +26,10 @@ export class DriverService {
         ];
       }
 
+      if (query.batch) {
+        searchFilter.batch = parseInt(query.batch);
+      }
+
       const total = await this.driverModel.countDocuments(searchFilter);
       const data = await this.driverModel
         .find(searchFilter)
