@@ -261,6 +261,7 @@ export class IvrService {
       const mapDriver = (d: DriverDocument) => ({
         driverId: d.driverId,
         mobileNumber: d.mobileNumber,
+        countryCode: d.countryCode || '',
       });
 
       const batch1Drivers = eligibleDrivers.filter((d) => d.batch === 1).map(mapDriver);
