@@ -338,40 +338,49 @@ export class IvrService {
       }
 
       if (ride) {
+        const baseTripData = {
+          tripId: ride._id,
+          tripNumber: ride.tripNumber,
+          customerName: ride.customerName || '',
+          customerNumber: ride.customerNumber || '',
+          queueName: ride.queueName || '',
+          recordingUrl: ride.recordingUrl || '',
+          rideStatus: ride.rideStatus || '',
+          rideStartDateTime: ride.rideStartDateTime || '',
+          rideCompleteDateTime: ride.rideCompleteDateTime || '',
+        };
+
         if (ride.rideStatus === RideStatus.ACCEPTED) {
-            workflowStage = 'ASSIGNED_NOT_STARTED';
-            activeTripData = {
-              tripId: ride._id,
-              tripNumber: ride.tripNumber
-            };
-          } else if (ride.rideStatus === RideStatus.STARTED) {
-            workflowStage = 'IN_PROGRESS';
-            activeTripData = {
-              tripId: ride._id,
-              tripNumber: ride.tripNumber
-            };
-          } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
-            workflowStage = 'AWAITING_PAYMENT';
-            
-            let durationMinutes = 0;
-            if (ride.rideStartDateTime && ride.rideCompleteDateTime) {
-              const start = new Date(ride.rideStartDateTime).getTime();
-              const end = new Date(ride.rideCompleteDateTime).getTime();
-              durationMinutes = Math.ceil((end - start) / 60000); 
-            }
-            
-            const calculatedFare = durationMinutes * 0.50;
-            
-            activeTripData = {
-              tripId: ride._id,
-              tripNumber: ride.tripNumber,
-              durationMinutes,
-              calculatedFare,
-              finalFare: calculatedFare,
-              currency: 'USD'
-            };
+          workflowStage = 'ASSIGNED_NOT_STARTED';
+          activeTripData = {
+            ...baseTripData,
+          };
+        } else if (ride.rideStatus === RideStatus.STARTED) {
+          workflowStage = 'IN_PROGRESS';
+          activeTripData = {
+            ...baseTripData,
+          };
+        } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
+          workflowStage = 'AWAITING_PAYMENT';
+          
+          let durationMinutes = 0;
+          if (ride.rideStartDateTime && ride.rideCompleteDateTime) {
+            const start = new Date(ride.rideStartDateTime).getTime();
+            const end = new Date(ride.rideCompleteDateTime).getTime();
+            durationMinutes = Math.ceil((end - start) / 60000); 
           }
+          
+          const calculatedFare = durationMinutes * 0.50;
+          
+          activeTripData = {
+            ...baseTripData,
+            durationMinutes,
+            calculatedFare,
+            finalFare: calculatedFare,
+            currency: 'USD',
+          };
         }
+      }
 
       return new ApiResponse(200, {
         registered: true,

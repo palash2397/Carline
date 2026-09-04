@@ -12,6 +12,9 @@ export class Ride {
   customerNumber: string;
 
   @Prop()
+  customerName: string;
+
+  @Prop()
   customerSelectOption: string;
 
   @Prop()
