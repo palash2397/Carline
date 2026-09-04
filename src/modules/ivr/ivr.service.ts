@@ -33,7 +33,10 @@ export class IvrService {
       );
     }
 
+    console.log('driver', driver);
+
     if (driver.activeRideId) {
+      console.log(driver.activeRideId);
       const activeRide = await this.rideModel.findById(driver.activeRideId);
 
       if (!activeRide) {
@@ -97,7 +100,8 @@ export class IvrService {
             const end = new Date(activeRide.rideCompleteDateTime).getTime();
             durationMinutes = Math.ceil((end - start) / 60000);
           }
-          const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+          const fareDetails =
+            await this.pricingService.calculateFare(durationMinutes);
           activeRide.rideAmount = fareDetails.calculatedFare;
 
           await activeRide.save();
@@ -110,12 +114,16 @@ export class IvrService {
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
           if (!activeRide.rideAmount || activeRide.rideAmount === 0) {
             let durationMinutes = 0;
-            if (activeRide.rideStartDateTime && activeRide.rideCompleteDateTime) {
+            if (
+              activeRide.rideStartDateTime &&
+              activeRide.rideCompleteDateTime
+            ) {
               const start = new Date(activeRide.rideStartDateTime).getTime();
               const end = new Date(activeRide.rideCompleteDateTime).getTime();
               durationMinutes = Math.ceil((end - start) / 60000);
             }
-            const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+            const fareDetails =
+              await this.pricingService.calculateFare(durationMinutes);
             activeRide.rideAmount = fareDetails.calculatedFare;
           }
 
@@ -469,7 +477,8 @@ export class IvrService {
             durationMinutes = Math.ceil((end - start) / 60000);
           }
 
-          const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+          const fareDetails =
+            await this.pricingService.calculateFare(durationMinutes);
 
           activeTripData = {
             ...baseTripData,
