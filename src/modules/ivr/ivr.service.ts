@@ -10,11 +10,14 @@ import { RideStatus } from 'src/common/enums/ride/ride-enum';
 import axios from 'axios';
 import { Msg } from 'src/helpers/responseMsg';
 
+import { PricingService } from '../pricing/pricing.service';
+
 @Injectable()
 export class IvrService {
   constructor(
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
+    private pricingService: PricingService,
   ) {}
 
   async processDriverAction(dto: IvrDriverActionDto) {
@@ -46,6 +49,12 @@ export class IvrService {
           );
         } else if (activeRide.rideStatus === RideStatus.STARTED) {
           return new ApiResponse(200, { menu: 'FINISH' }, 'Play finish menu');
+        } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+          return new ApiResponse(
+            200,
+            { menu: 'PAYMENT_OPTIONS' },
+            'Play payment options menu: 1-Cash, 2-Card, 3-Account, 4-Override',
+          );
         }
       } else {
         if (
@@ -81,14 +90,62 @@ export class IvrService {
         ) {
           activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
           activeRide.rideCompleteDateTime = new Date().toISOString();
-          // We keep the driver locked to the trip until payment is done
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'SAY_COMPLETED' },
-            Msg.RIDE_COMPLETED,
+            { action: 'PLAY_PAYMENT_MENU', menu: 'PAYMENT_OPTIONS' },
+            'Play payment options menu',
           );
+        } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+          if (dto.dtmfInput === '1') {
+            activeRide.paymentType = 'CASH';
+            activeRide.paymentStatus = 'COMPLETED';
+            activeRide.rideStatus = RideStatus.COMPLETED;
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            await activeRide.save();
+            await driver.save();
+            return new ApiResponse(
+              200,
+              { action: 'SAY_PAYMENT_CASH_SUCCESS' },
+              Msg.RIDE_COMPLETED,
+            );
+          } else if (dto.dtmfInput === '2') {
+            activeRide.paymentType = 'CREDIT_CARD';
+            activeRide.paymentStatus = 'COMPLETED';
+            activeRide.rideStatus = RideStatus.COMPLETED;
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            await activeRide.save();
+            await driver.save();
+            return new ApiResponse(
+              200,
+              { action: 'SAY_PAYMENT_CARD_SUCCESS' },
+              Msg.RIDE_COMPLETED,
+            );
+          } else if (dto.dtmfInput === '3') {
+            activeRide.paymentType = 'CUSTOMER_ACCOUNT';
+            activeRide.paymentStatus = 'COMPLETED';
+            activeRide.rideStatus = RideStatus.COMPLETED;
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            await activeRide.save();
+            await driver.save();
+            return new ApiResponse(
+              200,
+              { action: 'SAY_PAYMENT_ACCOUNT_SUCCESS' },
+              Msg.RIDE_COMPLETED,
+            );
+          } else if (dto.dtmfInput === '4') {
+            activeRide.paymentType = 'OVERRIDE';
+            await activeRide.save();
+            return new ApiResponse(
+              200,
+              { action: 'PROMPT_OVERRIDE_AMOUNT' },
+              'Prompt driver for custom override amount',
+            );
+          }
         }
       }
     } else {
@@ -125,7 +182,10 @@ export class IvrService {
     return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
   }
 
-  private dispatchLocks = new Map<string, { driverNumber: string; acceptedAt: Date }>();
+  private dispatchLocks = new Map<
+    string,
+    { driverNumber: string; acceptedAt: Date }
+  >();
 
   async processDispatchAction(dto: IvrDispatchActionDto) {
     const driver = await this.driverModel.findOne({
@@ -134,7 +194,11 @@ export class IvrService {
     if (!driver) return new ApiResponse(403, {}, Msg.DRIVER_NOT_FOUND);
 
     if (!dto.dispatchId && !dto.tripNumber) {
-      return new ApiResponse(400, {}, 'Either dispatchId or tripNumber is required');
+      return new ApiResponse(
+        400,
+        {},
+        'Either dispatchId or tripNumber is required',
+      );
     }
 
     // --- PRE-BOOKING DISPATCH FLOW (Using dispatchId) ---
@@ -206,7 +270,9 @@ export class IvrService {
             Msg.RIDE_ALREADY_ASSIGNED,
           );
         }
-        const trip = await this.rideModel.findOne({ tripNumber: dto.tripNumber });
+        const trip = await this.rideModel.findOne({
+          tripNumber: dto.tripNumber,
+        });
         driver.activeRideId = trip ? trip._id.toString() : '';
         driver.isAvailable = false;
         await driver.save();
@@ -264,9 +330,15 @@ export class IvrService {
         countryCode: d.countryCode || '',
       });
 
-      const batch1Drivers = eligibleDrivers.filter((d) => d.batch === 1).map(mapDriver);
-      const batch2Drivers = eligibleDrivers.filter((d) => d.batch === 2).map(mapDriver);
-      const batch3Drivers = eligibleDrivers.filter((d) => d.batch === 3).map(mapDriver);
+      const batch1Drivers = eligibleDrivers
+        .filter((d) => d.batch === 1)
+        .map(mapDriver);
+      const batch2Drivers = eligibleDrivers
+        .filter((d) => d.batch === 2)
+        .map(mapDriver);
+      const batch3Drivers = eligibleDrivers
+        .filter((d) => d.batch === 3)
+        .map(mapDriver);
 
       return new ApiResponse(
         200,
@@ -301,9 +373,13 @@ export class IvrService {
   async getDriverStatus(mobileNumber: string) {
     try {
       const driver = await this.driverModel.findOne({ mobileNumber });
-      
+
       if (!driver) {
-        return new ApiResponse(404, { registered: false }, Msg.DRIVER_NOT_FOUND);
+        return new ApiResponse(
+          404,
+          { registered: false },
+          Msg.DRIVER_NOT_FOUND,
+        );
       }
 
       let workflowStage = 'NO_ACTIVE_TRIP';
@@ -315,19 +391,21 @@ export class IvrService {
 
       // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
       if (!ride) {
-        ride = await this.rideModel.findOne({
-          $or: [
-            { driverId: driver._id.toString() },
-            { driverNumber: driver.mobileNumber },
-          ],
-          rideStatus: {
-            $in: [
-              RideStatus.ACCEPTED,
-              RideStatus.STARTED,
-              RideStatus.PAYMENT_PENDING,
+        ride = await this.rideModel
+          .findOne({
+            $or: [
+              { driverId: driver._id.toString() },
+              { driverNumber: driver.mobileNumber },
             ],
-          },
-        }).sort({ createdAt: -1 });
+            rideStatus: {
+              $in: [
+                RideStatus.ACCEPTED,
+                RideStatus.STARTED,
+                RideStatus.PAYMENT_PENDING,
+              ],
+            },
+          })
+          .sort({ createdAt: -1 });
 
         // Auto-sync driver record if active ride is found
         if (ride) {
@@ -362,38 +440,45 @@ export class IvrService {
           };
         } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
           workflowStage = 'AWAITING_PAYMENT';
-          
+
           let durationMinutes = 0;
           if (ride.rideStartDateTime && ride.rideCompleteDateTime) {
             const start = new Date(ride.rideStartDateTime).getTime();
             const end = new Date(ride.rideCompleteDateTime).getTime();
-            durationMinutes = Math.ceil((end - start) / 60000); 
+            durationMinutes = Math.ceil((end - start) / 60000);
           }
-          
-          const calculatedFare = durationMinutes * 0.50;
-          
+
+          const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+
           activeTripData = {
             ...baseTripData,
             durationMinutes,
-            calculatedFare,
-            finalFare: calculatedFare,
-            currency: 'USD',
+            baseFare: fareDetails.baseFare,
+            baseTimeMinutes: fareDetails.baseTimeMinutes,
+            perMinuteRate: fareDetails.perMinuteRate,
+            extraMinutes: fareDetails.extraMinutes,
+            calculatedFare: fareDetails.calculatedFare,
+            finalFare: fareDetails.finalFare,
+            currency: fareDetails.currency,
           };
         }
       }
 
-      return new ApiResponse(200, {
-        registered: true,
-        driverId: driver.driverId,
-        driverName: driver.driverName,
-        phoneNumber: driver.mobileNumber,
-        loggedIn: driver.isLoggedIn,
-        serviceType: driver.queueType,
-        available: driver.isAvailable,
-        workflowStage,
-        activeTrip: activeTripData
-      }, 'Driver status fetched');
-
+      return new ApiResponse(
+        200,
+        {
+          registered: true,
+          driverId: driver.driverId,
+          driverName: driver.driverName,
+          phoneNumber: driver.mobileNumber,
+          loggedIn: driver.isLoggedIn,
+          serviceType: driver.queueType,
+          available: driver.isAvailable,
+          workflowStage,
+          activeTrip: activeTripData,
+        },
+        'Driver status fetched',
+      );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }

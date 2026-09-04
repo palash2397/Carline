@@ -16,6 +16,7 @@ import { DriverModule } from './modules/driver/driver.module';
 import { CustomerModule } from './modules/customer/customer.module';
 import { RideModule } from './modules/ride/ride.module';
 import { IvrModule } from './modules/ivr/ivr.module';
+import { PricingModule } from './modules/pricing/pricing.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { IvrModule } from './modules/ivr/ivr.module';
     CustomerModule,
     RideModule,
     IvrModule,
+    PricingModule,
   ],
   controllers: [AppController],
   providers: [],
