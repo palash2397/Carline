@@ -90,6 +90,16 @@ export class IvrService {
         ) {
           activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
           activeRide.rideCompleteDateTime = new Date().toISOString();
+
+          let durationMinutes = 0;
+          if (activeRide.rideStartDateTime && activeRide.rideCompleteDateTime) {
+            const start = new Date(activeRide.rideStartDateTime).getTime();
+            const end = new Date(activeRide.rideCompleteDateTime).getTime();
+            durationMinutes = Math.ceil((end - start) / 60000);
+          }
+          const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+          activeRide.rideAmount = fareDetails.calculatedFare;
+
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
@@ -98,6 +108,17 @@ export class IvrService {
             'Play payment options menu',
           );
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+          if (!activeRide.rideAmount || activeRide.rideAmount === 0) {
+            let durationMinutes = 0;
+            if (activeRide.rideStartDateTime && activeRide.rideCompleteDateTime) {
+              const start = new Date(activeRide.rideStartDateTime).getTime();
+              const end = new Date(activeRide.rideCompleteDateTime).getTime();
+              durationMinutes = Math.ceil((end - start) / 60000);
+            }
+            const fareDetails = await this.pricingService.calculateFare(durationMinutes);
+            activeRide.rideAmount = fareDetails.calculatedFare;
+          }
+
           if (dto.dtmfInput === '1') {
             activeRide.paymentType = 'CASH';
             activeRide.paymentStatus = 'COMPLETED';
