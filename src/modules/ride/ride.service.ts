@@ -38,6 +38,7 @@ export class RideService {
       const total = await this.rideModel.countDocuments(searchFilter);
       const data = await this.rideModel
         .find(searchFilter)
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec();
