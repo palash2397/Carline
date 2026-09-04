@@ -33,7 +33,7 @@ export class DriverService {
       const total = await this.driverModel.countDocuments(searchFilter);
       const data = await this.driverModel
         .find(searchFilter)
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
         .exec();

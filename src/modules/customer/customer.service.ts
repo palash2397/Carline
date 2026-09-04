@@ -30,7 +30,7 @@ export class CustomerService {
       const total = await this.customerModel.countDocuments(searchFilter);
       const data = await this.customerModel
         .find(searchFilter)
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
         .exec();
