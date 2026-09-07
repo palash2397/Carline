@@ -13,6 +13,8 @@ import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PricingService } from './pricing.service';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
+import { UpdateZoneNamesDto } from './dto/update-zone-names.dto';
+import { BulkUpdatePricingDto } from './dto/bulk-update-pricing.dto';
 import { JwtAuthGuard } from '../auth/jwt/jwt-auth.guard';
 import { RoleGuard } from '../auth/roles/roles.guard';
 import { Roles } from '../auth/roles/roles.decorator';
@@ -24,6 +26,33 @@ import { DayOfWeekEnum } from 'src/common/enums/pricing/day-of-week.enum';
 @Controller('pricing')
 export class PricingController {
   constructor(private readonly pricingService: PricingService) {}
+
+  @Get('/zones')
+  async getZoneNames() {
+    return this.pricingService.getZoneNames();
+  }
+
+  @Put('/zones')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RoleGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async updateZoneNames(@Body() dto: UpdateZoneNamesDto) {
+    return this.pricingService.updateZoneNames(dto);
+  }
+
+  @Get('/matrix')
+  @ApiQuery({ name: 'zone', required: false, enum: ZoneEnum })
+  async getPricingMatrix(@Query('zone') zone?: string) {
+    return this.pricingService.getPricingMatrix(zone);
+  }
+
+  @Post('/bulk-update')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RoleGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async bulkUpdatePricing(@Body() dto: BulkUpdatePricingDto) {
+    return this.pricingService.bulkUpdatePricing(dto);
+  }
 
   @Post('/rules')
   @ApiBearerAuth('access-token')
