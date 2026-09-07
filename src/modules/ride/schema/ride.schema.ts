@@ -73,6 +73,9 @@ export class Ride {
 
   @Prop()
   driverId: string;
+
+  @Prop()
+  selectedZone: string;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);

@@ -93,26 +93,16 @@ export class IvrService {
         ) {
           activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
           activeRide.rideCompleteDateTime = new Date().toISOString();
-
-          let durationMinutes = 0;
-          if (activeRide.rideStartDateTime && activeRide.rideCompleteDateTime) {
-            const start = new Date(activeRide.rideStartDateTime).getTime();
-            const end = new Date(activeRide.rideCompleteDateTime).getTime();
-            durationMinutes = Math.ceil((end - start) / 60000);
-          }
-          const fareDetails =
-            await this.pricingService.calculateFare(durationMinutes);
-          activeRide.rideAmount = fareDetails.calculatedFare;
-
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'PLAY_PAYMENT_MENU', menu: 'PAYMENT_OPTIONS' },
-            'Play payment options menu',
+            { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+            'Trip finished. Please select Zone: 1 for Zone 1, 2 for Zone 2, 3 for Zone 3, 4 for Zone 4.',
           );
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
-          if (!activeRide.rideAmount || activeRide.rideAmount === 0) {
+          // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
+          if (!activeRide.selectedZone) {
             let durationMinutes = 0;
             if (
               activeRide.rideStartDateTime &&
@@ -122,9 +112,29 @@ export class IvrService {
               const end = new Date(activeRide.rideCompleteDateTime).getTime();
               durationMinutes = Math.ceil((end - start) / 60000);
             }
-            const fareDetails =
-              await this.pricingService.calculateFare(durationMinutes);
+
+            const fareDetails = await this.pricingService.calculateZoneFare(
+              dto.dtmfInput,
+              durationMinutes,
+              activeRide.rideStartDateTime,
+            );
+
+            activeRide.selectedZone = fareDetails.zone;
             activeRide.rideAmount = fareDetails.calculatedFare;
+            await activeRide.save();
+
+            return new ApiResponse(
+              200,
+              {
+                action: 'PLAY_PAYMENT_MENU',
+                menu: 'PAYMENT_OPTIONS',
+                durationMinutes,
+                calculatedFare: fareDetails.calculatedFare,
+                selectedZone: fareDetails.zone,
+                currency: fareDetails.currency,
+              },
+              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account.`,
+            );
           }
 
           if (dto.dtmfInput === '1') {
@@ -478,12 +488,18 @@ export class IvrService {
           }
 
           const fareDetails =
-            await this.pricingService.calculateFare(durationMinutes);
+            await this.pricingService.calculateZoneFare(
+              ride.selectedZone || '1',
+              durationMinutes,
+              ride.rideStartDateTime,
+            );
 
           activeTripData = {
             ...baseTripData,
             durationMinutes,
+            selectedZone: fareDetails.zone,
             baseFare: fareDetails.baseFare,
+            freeMinutes: fareDetails.freeMinutes,
             baseTimeMinutes: fareDetails.baseTimeMinutes,
             perMinuteRate: fareDetails.perMinuteRate,
             extraMinutes: fareDetails.extraMinutes,
