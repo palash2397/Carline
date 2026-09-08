@@ -76,6 +76,18 @@ export class Ride {
 
   @Prop()
   selectedZone: string;
+
+  @Prop()
+  paymentTransactionId: string;
+
+  @Prop()
+  paymentAuthCode: string;
+
+  @Prop()
+  paymentFailureReason: string;
+
+  @Prop({ type: Object })
+  paymentGatewayResponse: any;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);

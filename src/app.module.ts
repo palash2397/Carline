@@ -17,6 +17,7 @@ import { CustomerModule } from './modules/customer/customer.module';
 import { RideModule } from './modules/ride/ride.module';
 import { IvrModule } from './modules/ivr/ivr.module';
 import { PricingModule } from './modules/pricing/pricing.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
     RideModule,
     IvrModule,
     PricingModule,
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [],

@@ -6,6 +6,7 @@ import { Driver, DriverSchema } from '../driver/schema/driver.schema';
 import { Ride, RideSchema } from '../ride/schema/ride.schema';
 
 import { PricingModule } from '../pricing/pricing.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PricingModule } from '../pricing/pricing.module';
       { name: Ride.name, schema: RideSchema },
     ]),
     PricingModule,
+    PaymentModule,
   ],
   controllers: [IvrController],
   providers: [IvrService],

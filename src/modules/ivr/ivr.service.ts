@@ -11,6 +11,7 @@ import axios from 'axios';
 import { Msg } from 'src/helpers/responseMsg';
 
 import { PricingService } from '../pricing/pricing.service';
+import { PaymentService } from '../payment/payment.service';
 
 @Injectable()
 export class IvrService {
@@ -18,6 +19,7 @@ export class IvrService {
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
     private pricingService: PricingService,
+    private paymentService: PaymentService,
   ) {}
 
   async processDriverAction(dto: IvrDriverActionDto) {
@@ -165,6 +167,13 @@ export class IvrService {
             );
           } else if (dto.dtmfInput === '3') {
             activeRide.paymentType = 'CUSTOMER_ACCOUNT';
+            
+            // Trigger USAePay charge via customer account
+            await this.paymentService.chargeRideVault({
+              tripNumber: activeRide.tripNumber,
+              amount: activeRide.rideAmount,
+            });
+
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
             driver.activeRideId = '';
