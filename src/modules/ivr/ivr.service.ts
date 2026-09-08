@@ -143,8 +143,14 @@ export class IvrService {
             activeRide.paymentType = 'CASH';
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
+            
             driver.activeRideId = '';
             driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            driver.lastTripTaken = new Date();
+            driver.earningsWithCash = (driver.earningsWithCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+
             await activeRide.save();
             await driver.save();
             return new ApiResponse(
@@ -156,8 +162,14 @@ export class IvrService {
             activeRide.paymentType = 'CREDIT_CARD';
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
+            
             driver.activeRideId = '';
             driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            driver.lastTripTaken = new Date();
+            driver.earningsWithoutCash = (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+
             await activeRide.save();
             await driver.save();
             return new ApiResponse(
@@ -176,8 +188,14 @@ export class IvrService {
 
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
+            
             driver.activeRideId = '';
             driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            driver.lastTripTaken = new Date();
+            driver.earningsWithoutCash = (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+
             await activeRide.save();
             await driver.save();
             return new ApiResponse(

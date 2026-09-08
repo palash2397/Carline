@@ -27,25 +27,71 @@ export class PaymentService {
     private customerModel: Model<CustomerDocument>,
   ) {}
 
-  private getAuthHeader(): { authHeader: string; apiKey: string } {
+  private async executeUSAePayRequest(endpoint: string, payload: any) {
     const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
     const apiPin = (process.env.USAEPAY_API_PIN || '').trim();
+    const baseUrl = (process.env.USAEPAY_BASE_URL || 'https://sandbox.usaepay.com/api/v2').replace(/\/$/, '');
 
-    if (!apiKey) {
-      this.logger.error('USAePay API Key is missing in environment variables');
+    const targetUrls = [
+      `${baseUrl}/${endpoint.replace(/^\//, '')}`,
+      `https://secure.usaepay.com/api/v2/${endpoint.replace(/^\//, '')}`,
+    ];
+
+    // Remove duplicate URLs
+    const urls = Array.from(new Set(targetUrls));
+
+    // Auth strategies
+    const authHeaders: { name: string; header: string }[] = [];
+
+    // 1. Basic Auth with PIN
+    authHeaders.push({
+      name: 'Basic with PIN',
+      header: `Basic ${Buffer.from(`${apiKey}:${apiPin}`).toString('base64')}`,
+    });
+
+    // 2. Basic Auth without PIN (for keys where PIN is not enabled)
+    authHeaders.push({
+      name: 'Basic without PIN',
+      header: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
+    });
+
+    // 3. USAePay s2 SHA256 Token Security Digest
+    try {
+      const crypto = require('crypto');
+      const seed = Date.now().toString() + Math.random().toString(36).substring(2, 8);
+      const prehash = `s2/${apiKey}/${seed}/${apiPin}`;
+      const hash = crypto.createHash('sha256').update(prehash).digest('hex');
+      const token = Buffer.from(`s2/${apiKey}/${seed}/${hash}`).toString('base64');
+      authHeaders.push({
+        name: 'USASHA256 s2 digest',
+        header: `USASHA256 ${token}`,
+      });
+    } catch (e) {}
+
+    let lastError: any = null;
+
+    for (const url of urls) {
+      for (const authObj of authHeaders) {
+        try {
+          this.logger.log(`Attempting USAePay request [${authObj.name}] at ${url}`);
+          const response = await axios.post(url, payload, {
+            headers: {
+              Authorization: authObj.header,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          this.logger.log(`USAePay Success using [${authObj.name}] at ${url}`);
+          return response;
+        } catch (err: any) {
+          lastError = err;
+          const errData = JSON.stringify(err.response?.data || err.message || '');
+          this.logger.warn(`USAePay [${authObj.name}] at ${url} failed: ${errData}`);
+        }
+      }
     }
 
-    const crypto = require('crypto');
-    const seed =
-      Date.now().toString() + Math.random().toString(36).substring(2, 9);
-    const prehash = apiKey + seed + apiPin;
-    const hash = crypto.createHash('sha256').update(prehash).digest('hex');
-
-    const token = Buffer.from(`${apiKey}:${seed}:${hash}`).toString('base64');
-    return {
-      authHeader: `USASHA256 ${token}`,
-      apiKey,
-    };
+    throw lastError;
   }
 
   private getBaseUrl(): string {
@@ -56,11 +102,11 @@ export class PaymentService {
 
   async processCardSale(dto: ProcessCardPaymentDto) {
     try {
-      const url = `${this.getBaseUrl()}/transactions`;
-      const { authHeader, apiKey } = this.getAuthHeader();
+      const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
 
       const payload = {
         key: apiKey,
+        source_key: apiKey,
         command: 'sale',
         amount: dto.amount,
         invoice: dto.tripNumber || `INV-${Date.now()}`,
@@ -73,14 +119,12 @@ export class PaymentService {
         },
       };
 
+      console.log('payload', payload);
       this.logger.log(`Initiating USAePay sale for amount: $${dto.amount}`);
 
-      const response = await axios.post(url, payload, {
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await this.executeUSAePayRequest('transactions', payload);
+
+      console.log('----------->', response.data);
 
       const resData = response.data;
       const isApproved =
@@ -184,8 +228,7 @@ export class PaymentService {
         return new ApiResponse(400, {}, Msg.BAD_REQUEST);
       }
 
-      const url = `${this.getBaseUrl()}/transactions`;
-      const { authHeader, apiKey } = this.getAuthHeader();
+      const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
 
       const payload: any = {
         key: apiKey,
@@ -206,12 +249,7 @@ export class PaymentService {
         }
       }
 
-      const response = await axios.post(url, payload, {
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await this.executeUSAePayRequest('transactions', payload);
 
       const resData = response.data;
       const isApproved =
@@ -285,8 +323,7 @@ export class PaymentService {
         });
       }
 
-      const url = `${this.getBaseUrl()}/customers`;
-      const { authHeader, apiKey } = this.getAuthHeader();
+      const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
 
       const payload = {
         key: apiKey,
@@ -305,12 +342,7 @@ export class PaymentService {
         ],
       };
 
-      const response = await axios.post(url, payload, {
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await this.executeUSAePayRequest('customers', payload);
 
       const resData = response.data;
       const customerId =
@@ -344,18 +376,17 @@ export class PaymentService {
 
   async refundTransaction(dto: RefundPaymentDto) {
     try {
-      const url = `${this.getBaseUrl()}/transactions/${dto.transactionId}/refund`;
-      const { authHeader } = this.getAuthHeader();
+      const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
+      const payload = {
+        key: apiKey,
+        command: 'refund',
+        amount: dto.amount,
+        reason: dto.reason || 'Customer refund',
+      };
 
-      const response = await axios.post(
-        url,
-        { amount: dto.amount, reason: dto.reason || 'Customer refund' },
-        {
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/json',
-          },
-        },
+      const response = await this.executeUSAePayRequest(
+        `transactions/${dto.transactionId}/refund`,
+        payload,
       );
 
       const resData = response.data;

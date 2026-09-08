@@ -56,6 +56,18 @@ export class DriverController {
     return this.driverService.getDrivers(query);
   }
 
+  @Get('/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async getDriverById(@Param('id') id: string) {
+    return this.driverService.getDriverById(id);
+  }
+
+  @Get('/:id/earnings')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async getDriverEarningsSummary(@Param('id') id: string) {
+    return this.driverService.getDriverEarningsSummary(id);
+  }
+
   @Post('/add')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async addDriver(@Body() createDriverDto: CreateDriverDto) {
