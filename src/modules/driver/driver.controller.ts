@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { DriverService } from './driver.service';
-import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExcludeEndpoint, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { RoleGuard } from '../auth/roles/roles.guard';
 import { Roles } from 'src/modules/auth/roles/roles.decorator';
@@ -57,6 +57,7 @@ export class DriverController {
     return this.driverService.getDrivers(query);
   }
 
+  @ApiExcludeEndpoint()
   @Post('/sync-earnings')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async syncAllDriverEarnings() {
