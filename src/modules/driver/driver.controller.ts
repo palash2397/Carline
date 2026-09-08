@@ -56,6 +56,12 @@ export class DriverController {
     return this.driverService.getDrivers(query);
   }
 
+  @Post('/sync-earnings')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async syncAllDriverEarnings() {
+    return this.driverService.syncAllDriverEarnings();
+  }
+
   @Get('/:id')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async getDriverById(@Param('id') id: string) {

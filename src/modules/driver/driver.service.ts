@@ -133,6 +133,22 @@ export class DriverService {
     }
   }
 
+  async syncAllDriverEarnings() {
+    try {
+      const drivers = await this.driverModel.find();
+      for (const d of drivers) {
+        await this.calculateDriverEarnings(d);
+      }
+      return new ApiResponse(
+        200,
+        { syncedCount: drivers.length },
+        'Driver earnings synchronized successfully',
+      );
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
   async getDriverEarningsSummary(id: string) {
     try {
       const result = await this.getDriverById(id);
@@ -168,21 +184,16 @@ export class DriverService {
         searchFilter.batch = parseInt(query.batch);
       }
 
-      const total = await this.driverModel.countDocuments(searchFilter);
-      const drivers = await this.driverModel
-        .find(searchFilter)
-        .sort({ createdAt: -1, _id: -1 })
-        .skip(skip)
-        .limit(limit)
-        .exec();
-
-      // Dynamically calculate live earnings for all drivers in list
-      const data = await Promise.all(
-        drivers.map(async (d) => {
-          await this.calculateDriverEarnings(d);
-          return d.toObject();
-        }),
-      );
+      const [total, data] = await Promise.all([
+        this.driverModel.countDocuments(searchFilter),
+        this.driverModel
+          .find(searchFilter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .exec(),
+      ]);
 
       return new ApiResponse(
         200,

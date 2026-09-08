@@ -107,3 +107,8 @@ export class Driver {
 }
 
 export const DriverSchema = SchemaFactory.createForClass(Driver);
+DriverSchema.index({ createdAt: -1 });
+DriverSchema.index({ driverId: 1 });
+DriverSchema.index({ mobileNumber: 1 });
+DriverSchema.index({ driverName: 1 });
+
