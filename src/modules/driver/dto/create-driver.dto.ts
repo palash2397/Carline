@@ -62,4 +62,19 @@ export class CreateDriverDto {
   @IsOptional()
   @IsNumber()
   batch?: number;
+
+  @ApiProperty({ example: 4096.5, description: 'Earnings with cash', required: false })
+  @IsOptional()
+  @IsNumber()
+  earningsWithCash?: number;
+
+  @ApiProperty({ example: 9, description: 'Earnings without cash', required: false })
+  @IsOptional()
+  @IsNumber()
+  earningsWithoutCash?: number;
+
+  @ApiProperty({ example: 4105.5, description: 'Total earnings', required: false })
+  @IsOptional()
+  @IsNumber()
+  totalEarnings?: number;
 }

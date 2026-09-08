@@ -18,6 +18,7 @@ import { UserRole } from 'src/common/enums/user/role.enum';
 import { JwtAuthGuard } from '../auth/jwt/jwt-auth.guard';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
+import { UpdateDriverEarningsDto } from './dto/update-driver-earnings.dto';
 
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RoleGuard)
@@ -72,6 +73,14 @@ export class DriverController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async getDriverEarningsSummary(@Param('id') id: string) {
     return this.driverService.getDriverEarningsSummary(id);
+  }
+
+  @Put('/earnings')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async updateDriverEarnings(
+    @Body() updateDriverEarningsDto: UpdateDriverEarningsDto,
+  ) {
+    return this.driverService.updateDriverEarnings(updateDriverEarningsDto);
   }
 
   @Post('/add')

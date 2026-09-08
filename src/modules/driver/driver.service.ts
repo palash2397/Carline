@@ -228,6 +228,26 @@ export class DriverService {
 
   async updateDriver(id: string, dto: any) {
     try {
+      if (
+        (dto.earningsWithCash !== undefined ||
+          dto.earningsWithoutCash !== undefined) &&
+        dto.totalEarnings === undefined
+      ) {
+        let existingDriver: DriverDocument | null = null;
+        if (isValidObjectId(id)) {
+          existingDriver = await this.driverModel.findById(id);
+        }
+        const withCash =
+          dto.earningsWithCash !== undefined
+            ? dto.earningsWithCash
+            : existingDriver?.earningsWithCash || 0;
+        const withoutCash =
+          dto.earningsWithoutCash !== undefined
+            ? dto.earningsWithoutCash
+            : existingDriver?.earningsWithoutCash || 0;
+        dto.totalEarnings = Number((withCash + withoutCash).toFixed(2));
+      }
+
       const updatedDriver = await this.driverModel.findByIdAndUpdate(
         id,
         { $set: dto },
@@ -235,10 +255,58 @@ export class DriverService {
       );
 
       if (!updatedDriver) {
-        return new ApiResponse(404, {}, 'Driver not found');
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
 
       return new ApiResponse(200, updatedDriver, 'Driver updated successfully');
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async updateDriverEarnings(dto: any) {
+    try {
+      const driver = await this.driverModel.findById(dto.driverId);
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      if (dto.earningsWithCash !== undefined) {
+        driver.earningsWithCash = Number(dto.earningsWithCash);
+      }
+
+      if (dto.earningsWithoutCash !== undefined) {
+        driver.earningsWithoutCash = Number(dto.earningsWithoutCash);
+      }
+
+      if (dto.totalEarnings !== undefined) {
+        driver.totalEarnings = Number(dto.totalEarnings);
+      } else if (
+        dto.earningsWithCash !== undefined ||
+        dto.earningsWithoutCash !== undefined
+      ) {
+        driver.totalEarnings = Number(
+          (
+            (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0)
+          ).toFixed(2),
+        );
+      }
+
+      await driver.save();
+
+      return new ApiResponse(
+        200,
+        {
+          _id: driver._id,
+          driverId: driver.driverId,
+          driverName: driver.driverName,
+          earningsWithCash: driver.earningsWithCash,
+          earningsWithoutCash: driver.earningsWithoutCash,
+          totalEarnings: driver.totalEarnings,
+        },
+        Msg.DATA_UPDATED,
+      );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
