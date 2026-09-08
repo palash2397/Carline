@@ -166,4 +166,12 @@ export const Msg = {
   RIDE_ASSIGNED_TO_YOU: 'Ride assigned successfully to you',
   RIDE_ALREADY_ASSIGNED: 'Ride already assigned successfully',
   RIDE_BOOKED: 'Ride booked successfully',
+
+  // Payment
+  PAYMENT_PROCESSED: 'Card payment processed successfully',
+  PAYMENT_DECLINED: 'Payment declined by gateway',
+  PAYMENT_FAILED: 'Payment gateway error',
+  PAYMENT_REFUNDED: 'Refund processed successfully',
+  VAULT_CHARGED: 'Ride charged successfully via customer account',
+  CARD_SAVED: 'Card saved successfully',
 };

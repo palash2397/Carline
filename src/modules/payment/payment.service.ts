@@ -4,11 +4,15 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import { PaymentLog, PaymentLogDocument } from './schema/payment-log.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
+import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
 import { ProcessCardPaymentDto } from './dto/process-card-payment.dto';
 import { ChargeRidePaymentDto } from './dto/charge-ride-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { SaveCardDto } from './dto/save-card.dto';
 import { ApiResponse } from '../../helpers/ApiResponse';
 import { Msg } from 'src/helpers/responseMsg';
+import { PaymentStatus } from 'src/common/enums/payment/payment-status';
+import { PaymentType } from 'src/common/enums/payment/payment-type';
 
 @Injectable()
 export class PaymentService {
@@ -19,18 +23,29 @@ export class PaymentService {
     private paymentLogModel: Model<PaymentLogDocument>,
     @InjectModel(Ride.name)
     private rideModel: Model<RideDocument>,
+    @InjectModel(Customer.name)
+    private customerModel: Model<CustomerDocument>,
   ) {}
 
-  private getAuthHeader(): string {
+  private getAuthHeader(): { authHeader: string; apiKey: string } {
     const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
     const apiPin = (process.env.USAEPAY_API_PIN || '').trim();
 
-    if (!apiKey || !apiPin) {
-      this.logger.error('USAePay API Key or PIN is missing in environment variables');
+    if (!apiKey) {
+      this.logger.error('USAePay API Key is missing in environment variables');
     }
 
-    const credentials = Buffer.from(`${apiKey}:${apiPin}`).toString('base64');
-    return `Basic ${credentials}`;
+    const crypto = require('crypto');
+    const seed =
+      Date.now().toString() + Math.random().toString(36).substring(2, 9);
+    const prehash = apiKey + seed + apiPin;
+    const hash = crypto.createHash('sha256').update(prehash).digest('hex');
+
+    const token = Buffer.from(`${apiKey}:${seed}:${hash}`).toString('base64');
+    return {
+      authHeader: `USASHA256 ${token}`,
+      apiKey,
+    };
   }
 
   private getBaseUrl(): string {
@@ -42,9 +57,10 @@ export class PaymentService {
   async processCardSale(dto: ProcessCardPaymentDto) {
     try {
       const url = `${this.getBaseUrl()}/transactions`;
-      const authHeader = this.getAuthHeader();
+      const { authHeader, apiKey } = this.getAuthHeader();
 
       const payload = {
+        key: apiKey,
         command: 'sale',
         amount: dto.amount,
         invoice: dto.tripNumber || `INV-${Date.now()}`,
@@ -68,7 +84,10 @@ export class PaymentService {
 
       const resData = response.data;
       const isApproved =
-        resData && (resData.status === 'Approved' || resData.result_code === 'A' || resData.result === 'Approved');
+        resData &&
+        (resData.status === 'Approved' ||
+          resData.result_code === 'A' ||
+          resData.result === 'Approved');
 
       const last4 = dto.cardNumber ? dto.cardNumber.slice(-4) : '****';
       const cardMasked = `**** **** **** ${last4}`;
@@ -78,13 +97,15 @@ export class PaymentService {
         tripNumber: dto.tripNumber || '',
         amount: dto.amount,
         currency: 'USD',
-        paymentType: 'CREDIT_CARD',
-        status: isApproved ? 'APPROVED' : 'DECLINED',
+        paymentType: PaymentType.CREDIT_CARD,
+        status: isApproved ? PaymentStatus.APPROVED : PaymentStatus.DECLINED,
         transactionId: resData.refnum || resData.key || '',
         authCode: resData.authcode || resData.auth_code || '',
         cardMasked,
         gatewayResponse: resData,
-        errorMessage: isApproved ? '' : resData.error || resData.status || 'Transaction Declined',
+        errorMessage: isApproved
+          ? ''
+          : resData.error || resData.status || 'Transaction Declined',
       });
       await log.save();
 
@@ -92,11 +113,13 @@ export class PaymentService {
         const query = dto.tripNumber
           ? { tripNumber: dto.tripNumber }
           : { _id: dto.rideId };
-        
+
         await this.rideModel.updateOne(query, {
           $set: {
-            paymentType: 'CREDIT_CARD',
-            paymentStatus: isApproved ? 'COMPLETED' : 'FAILED',
+            paymentType: PaymentType.CREDIT_CARD,
+            paymentStatus: isApproved
+              ? PaymentStatus.COMPLETED
+              : PaymentStatus.FAILED,
             paymentTransactionId: resData.refnum || resData.key || '',
             paymentAuthCode: resData.authcode || '',
             paymentGatewayResponse: resData,
@@ -109,7 +132,7 @@ export class PaymentService {
         return new ApiResponse(
           400,
           { gatewayResponse: resData },
-          resData.error || 'Card payment declined by USAePay',
+          Msg.PAYMENT_DECLINED,
         );
       }
 
@@ -118,18 +141,18 @@ export class PaymentService {
         {
           transactionId: resData.refnum || resData.key,
           authCode: resData.authcode,
-          status: 'APPROVED',
+          status: PaymentStatus.APPROVED,
           amount: dto.amount,
           cardMasked,
         },
-        'Card payment processed successfully',
+        Msg.PAYMENT_PROCESSED,
       );
     } catch (error: any) {
       const errorMsg =
         error.response?.data?.error ||
         error.response?.data?.message ||
         error.message ||
-        'Failed to process transaction with USAePay';
+        Msg.PAYMENT_FAILED;
 
       this.logger.error(`USAePay Transaction Error: ${errorMsg}`);
 
@@ -145,7 +168,7 @@ export class PaymentService {
       });
       await log.save();
 
-      return new ApiResponse(500, { error: errorMsg }, 'Payment gateway error');
+      return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
     }
   }
 
@@ -158,13 +181,14 @@ export class PaymentService {
 
       const amountToCharge = dto.amount || ride.rideAmount;
       if (!amountToCharge || amountToCharge <= 0) {
-        return new ApiResponse(400, {}, 'Invalid ride fare amount');
+        return new ApiResponse(400, {}, Msg.BAD_REQUEST);
       }
 
       const url = `${this.getBaseUrl()}/transactions`;
-      const authHeader = this.getAuthHeader();
+      const { authHeader, apiKey } = this.getAuthHeader();
 
       const payload: any = {
+        key: apiKey,
         command: 'sale',
         amount: amountToCharge,
         invoice: dto.tripNumber,
@@ -173,6 +197,13 @@ export class PaymentService {
 
       if (dto.customerId) {
         payload.customer_id = dto.customerId;
+      } else if (ride.customerNumber) {
+        const customer = await this.customerModel.findOne({
+          mobileNumber: ride.customerNumber,
+        });
+        if (customer && customer.usaepayCustomerId) {
+          payload.customer_id = customer.usaepayCustomerId;
+        }
       }
 
       const response = await axios.post(url, payload, {
@@ -184,10 +215,15 @@ export class PaymentService {
 
       const resData = response.data;
       const isApproved =
-        resData && (resData.status === 'Approved' || resData.result_code === 'A' || resData.result === 'Approved');
+        resData &&
+        (resData.status === 'Approved' ||
+          resData.result_code === 'A' ||
+          resData.result === 'Approved');
 
-      ride.paymentType = 'CUSTOMER_ACCOUNT';
-      ride.paymentStatus = isApproved ? 'COMPLETED' : 'FAILED';
+      ride.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+      ride.paymentStatus = isApproved
+        ? PaymentStatus.COMPLETED
+        : PaymentStatus.FAILED;
       ride.paymentTransactionId = resData.refnum || '';
       ride.paymentAuthCode = resData.authcode || '';
       ride.paymentGatewayResponse = resData;
@@ -200,17 +236,19 @@ export class PaymentService {
         customerNumber: ride.customerNumber,
         amount: amountToCharge,
         currency: 'USD',
-        paymentType: 'CUSTOMER_ACCOUNT',
-        status: isApproved ? 'APPROVED' : 'DECLINED',
+        paymentType: PaymentType.CUSTOMER_ACCOUNT,
+        status: isApproved ? PaymentStatus.APPROVED : PaymentStatus.DECLINED,
         transactionId: resData.refnum || '',
         authCode: resData.authcode || '',
         gatewayResponse: resData,
-        errorMessage: isApproved ? '' : resData.error || 'Account Charge Declined',
+        errorMessage: isApproved
+          ? ''
+          : resData.error || 'Account Charge Declined',
       });
       await log.save();
 
       if (!isApproved) {
-        return new ApiResponse(400, resData, 'Customer account charge declined');
+        return new ApiResponse(400, resData, Msg.PAYMENT_DECLINED);
       }
 
       return new ApiResponse(
@@ -221,23 +259,93 @@ export class PaymentService {
           authCode: resData.authcode,
           amount: amountToCharge,
         },
-        'Ride charged successfully via customer account',
+        Msg.VAULT_CHARGED,
       );
     } catch (error: any) {
       const errorMsg =
         error.response?.data?.error ||
         error.response?.data?.message ||
         error.message ||
-        'USAePay vault charge error';
+        Msg.PAYMENT_FAILED;
 
-      return new ApiResponse(500, { error: errorMsg }, 'Vault payment gateway error');
+      return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
+    }
+  }
+
+  async saveCustomerVaultCard(dto: SaveCardDto) {
+    try {
+      let customer = await this.customerModel.findOne({
+        mobileNumber: dto.customerNumber,
+      });
+
+      if (!customer) {
+        customer = new this.customerModel({
+          mobileNumber: dto.customerNumber,
+          fullName: dto.cardholder || 'IVR Customer',
+        });
+      }
+
+      const url = `${this.getBaseUrl()}/customers`;
+      const { authHeader, apiKey } = this.getAuthHeader();
+
+      const payload = {
+        key: apiKey,
+        name: dto.cardholder || customer.fullName || 'Valued Customer',
+        phone: dto.customerNumber,
+        payment_methods: [
+          {
+            card: {
+              number: dto.cardNumber,
+              expiration: dto.expiration,
+              cvv: dto.cvv,
+              cardholder:
+                dto.cardholder || customer.fullName || 'Valued Customer',
+            },
+          },
+        ],
+      };
+
+      const response = await axios.post(url, payload, {
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const resData = response.data;
+      const customerId =
+        resData.custnum || resData.id || resData.key || `USAEPAY-${Date.now()}`;
+      const last4 = dto.cardNumber ? dto.cardNumber.slice(-4) : '****';
+
+      customer.usaepayCustomerId = customerId;
+      customer.cardLast4 = last4;
+      customer.cardBrand = 'Credit Card';
+      await customer.save();
+
+      return new ApiResponse(
+        200,
+        {
+          customerNumber: dto.customerNumber,
+          usaepayCustomerId: customerId,
+          cardLast4: last4,
+        },
+        Msg.CARD_SAVED,
+      );
+    } catch (error: any) {
+      const errorMsg =
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to save card to USAePay vault';
+
+      return new ApiResponse(500, { error: errorMsg }, Msg.SERVER_ERROR);
     }
   }
 
   async refundTransaction(dto: RefundPaymentDto) {
     try {
       const url = `${this.getBaseUrl()}/transactions/${dto.transactionId}/refund`;
-      const authHeader = this.getAuthHeader();
+      const { authHeader } = this.getAuthHeader();
 
       const response = await axios.post(
         url,
@@ -255,22 +363,22 @@ export class PaymentService {
       const log = new this.paymentLogModel({
         amount: dto.amount,
         currency: 'USD',
-        paymentType: 'REFUND',
-        status: 'REFUNDED',
+        paymentType: PaymentType.REFUND,
+        status: PaymentStatus.REFUNDED,
         transactionId: dto.transactionId,
         gatewayResponse: resData,
       });
       await log.save();
 
-      return new ApiResponse(200, resData, 'Refund processed successfully');
+      return new ApiResponse(200, resData, Msg.PAYMENT_REFUNDED);
     } catch (error: any) {
       const errorMsg =
         error.response?.data?.error ||
         error.response?.data?.message ||
         error.message ||
-        'Refund execution failed';
+        Msg.PAYMENT_FAILED;
 
-      return new ApiResponse(500, { error: errorMsg }, 'Refund gateway error');
+      return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
     }
   }
 
@@ -287,6 +395,10 @@ export class PaymentService {
         .skip(skip)
         .limit(limit)
         .exec();
+
+      if (!logs || logs.length === 0) {
+        return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
+      }
 
       return new ApiResponse(
         200,

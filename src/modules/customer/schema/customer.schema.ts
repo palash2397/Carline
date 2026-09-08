@@ -40,6 +40,15 @@ export class Customer {
 
   @Prop()
   totalTripsDropped: string;
+
+  @Prop()
+  usaepayCustomerId: string;
+
+  @Prop()
+  cardLast4: string;
+
+  @Prop()
+  cardBrand: string;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);
