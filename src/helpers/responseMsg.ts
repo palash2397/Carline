@@ -174,4 +174,11 @@ export const Msg = {
   PAYMENT_REFUNDED: 'Refund processed successfully',
   VAULT_CHARGED: 'Ride charged successfully via customer account',
   CARD_SAVED: 'Card saved successfully',
+
+  // Fare Override
+  FARE_OVERRIDE_SUCCESS: 'Fare overridden successfully',
+  FARE_OVERRIDE_INVALID: 'Invalid override amount',
+  FARE_OVERRIDE_NOT_ALLOWED: 'Trip is not awaiting payment',
+  NO_ACTIVE_TRIP: 'No active trip found',
+  PAYMENT_ALREADY_COMPLETED: 'Trip payment is already completed',
 };

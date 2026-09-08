@@ -23,8 +23,17 @@ export class IvrService {
   ) {}
 
   async processDriverAction(dto: IvrDriverActionDto) {
+    const callerNumber =
+      dto.callerNumber || dto.driverNumber || dto.phoneNumber || '';
+    const numberDigits = callerNumber.replace(/\D/g, '');
+
     const driver = await this.driverModel.findOne({
-      mobileNumber: dto.callerNumber,
+      $or: [
+        { mobileNumber: callerNumber },
+        ...(numberDigits && numberDigits.length >= 7
+          ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
+          : []),
+      ],
     });
 
     if (!driver) {
@@ -35,16 +44,61 @@ export class IvrService {
       );
     }
 
-    console.log('driver', driver);
-
+    // Locate active ride
+    let activeRide: RideDocument | null = null;
     if (driver.activeRideId) {
-      console.log(driver.activeRideId);
-      const activeRide = await this.rideModel.findById(driver.activeRideId);
+      activeRide = await this.rideModel.findById(driver.activeRideId);
+    }
 
-      if (!activeRide) {
-        return new ApiResponse(404, {}, Msg.RIDE_NOT_FOUND);
+    if (!activeRide) {
+      activeRide = await this.rideModel
+        .findOne({
+          $or: [
+            { driverId: driver._id.toString() },
+            { driverId: String(driver.driverId) },
+            { driverNumber: driver.mobileNumber },
+          ],
+          rideStatus: {
+            $in: [
+              RideStatus.ACCEPTED,
+              RideStatus.STARTED,
+              RideStatus.PAYMENT_PENDING,
+              'ACCEPTED',
+              'STARTED',
+              'PAYMENT_PENDING',
+            ],
+          },
+        })
+        .sort({ createdAt: -1 });
+
+      if (activeRide) {
+        driver.activeRideId = activeRide._id.toString();
+        driver.isAvailable = false;
+        await driver.save();
       }
+    }
 
+    // Check if this action is an override request
+    const isOverrideAction =
+      dto.action === 'OVERRIDE_FARE' ||
+      dto.action === 'OVERRIDE' ||
+      dto.overrideAmountCents !== undefined ||
+      dto.amountCents !== undefined ||
+      dto.overrideAmount !== undefined ||
+      dto.amount !== undefined;
+
+    const hasOverrideDigits =
+      activeRide &&
+      activeRide.paymentType === 'OVERRIDE' &&
+      dto.dtmfInput &&
+      dto.dtmfInput.length >= 2 &&
+      /^\d+/.test(dto.dtmfInput.replace(/#/g, ''));
+
+    if (isOverrideAction || hasOverrideDigits) {
+      return this.handleFareOverride(driver, activeRide, dto);
+    }
+
+    if (activeRide) {
       if (!dto.dtmfInput) {
         if (activeRide.rideStatus === RideStatus.ACCEPTED) {
           return new ApiResponse(
@@ -123,6 +177,7 @@ export class IvrService {
 
             activeRide.selectedZone = fareDetails.zone;
             activeRide.rideAmount = fareDetails.calculatedFare;
+            activeRide.originalCalculatedFare = fareDetails.calculatedFare;
             await activeRide.save();
 
             return new ApiResponse(
@@ -135,7 +190,7 @@ export class IvrService {
                 selectedZone: fareDetails.zone,
                 currency: fareDetails.currency,
               },
-              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account.`,
+              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account, 4 for Override Amount, 0 to Go Back.`,
             );
           }
 
@@ -211,6 +266,18 @@ export class IvrService {
               { action: 'PROMPT_OVERRIDE_AMOUNT' },
               'Prompt driver for custom override amount',
             );
+          } else if (dto.dtmfInput === '0') {
+            return new ApiResponse(
+              200,
+              {
+                action: 'PLAY_PAYMENT_MENU',
+                menu: 'PAYMENT_OPTIONS',
+                calculatedFare: activeRide.rideAmount,
+                fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                currency: 'USD',
+              },
+              'Returned to payment menu',
+            );
           }
         }
       }
@@ -246,6 +313,181 @@ export class IvrService {
     }
 
     return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
+  }
+
+  private async handleFareOverride(
+    driver: DriverDocument,
+    activeRide: RideDocument | null,
+    dto: IvrDriverActionDto,
+  ) {
+    // 1. Validate driver is logged in
+    if (!driver.isLoggedIn) {
+      return new ApiResponse(
+        409,
+        { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
+        'Driver is not logged in',
+      );
+    }
+
+    // 2. Validate active trip exists
+    if (!activeRide) {
+      return new ApiResponse(
+        404,
+        { action: 'NO_ACTIVE_TRIP' },
+        Msg.NO_ACTIVE_TRIP,
+      );
+    }
+
+    // 3. Validate trip belongs to this driver
+    const isDriverMatch =
+      activeRide.driverNumber === driver.mobileNumber ||
+      activeRide.driverId === driver._id.toString() ||
+      activeRide.driverId === String(driver.driverId);
+    if (!isDriverMatch) {
+      return new ApiResponse(
+        409,
+        { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
+        'Trip is assigned to another driver',
+      );
+    }
+
+    // 4. Validate payment not already completed
+    if (
+      activeRide.paymentStatus === 'COMPLETED' ||
+      activeRide.rideStatus === RideStatus.COMPLETED ||
+      activeRide.rideStatus === 'COMPLETED'
+    ) {
+      return new ApiResponse(
+        409,
+        { action: 'PAYMENT_ALREADY_COMPLETED' },
+        Msg.PAYMENT_ALREADY_COMPLETED,
+      );
+    }
+
+    // 5. Validate trip is finished and awaiting payment
+    if (
+      activeRide.rideStatus !== RideStatus.PAYMENT_PENDING &&
+      activeRide.rideStatus !== 'PAYMENT_PENDING'
+    ) {
+      return new ApiResponse(
+        409,
+        { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
+        Msg.FARE_OVERRIDE_NOT_ALLOWED,
+      );
+    }
+
+    // 6. Validate zone/fare calculation has occurred
+    if (
+      !activeRide.selectedZone &&
+      !activeRide.rideAmount &&
+      !activeRide.originalCalculatedFare
+    ) {
+      return new ApiResponse(
+        409,
+        { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
+        'Trip zone and fare must be calculated before overriding',
+      );
+    }
+
+    // 7. Extract override amount in integer cents
+    let amountCents: number | null = null;
+    if (dto.overrideAmountCents !== undefined && dto.overrideAmountCents !== null) {
+      amountCents = Number(dto.overrideAmountCents);
+    } else if (dto.amountCents !== undefined && dto.amountCents !== null) {
+      amountCents = Number(dto.amountCents);
+    } else if (dto.overrideAmount !== undefined && dto.overrideAmount !== null) {
+      amountCents = Math.round(Number(dto.overrideAmount) * 100);
+    } else if (dto.amount !== undefined && dto.amount !== null) {
+      amountCents = Math.round(Number(dto.amount) * 100);
+    } else if (dto.dtmfInput) {
+      const cleanDigits = dto.dtmfInput.replace(/#/g, '').trim();
+      if (/^\d+$/.test(cleanDigits)) {
+        amountCents = Number(cleanDigits);
+      }
+    }
+
+    // Validate amount: positive integer cents, reasonable cap (<= 100000 cents / $1000.00)
+    if (
+      amountCents === null ||
+      isNaN(amountCents) ||
+      amountCents <= 0 ||
+      !Number.isInteger(amountCents) ||
+      amountCents > 100000
+    ) {
+      return new ApiResponse(
+        400,
+        { action: 'FARE_OVERRIDE_INVALID' },
+        Msg.FARE_OVERRIDE_INVALID,
+      );
+    }
+
+    const newFareDollars = Number((amountCents / 100).toFixed(2));
+
+    // 8. Idempotency Check: if identical override was already applied, return success
+    if (
+      activeRide.fareOverrideApplied &&
+      activeRide.rideAmount === newFareDollars
+    ) {
+      return new ApiResponse(
+        200,
+        {
+          action: 'FARE_OVERRIDE_SUCCESS',
+          tripNumber: activeRide.tripNumber,
+          workflowStage: 'AWAITING_PAYMENT',
+          paymentStatus: 'PENDING',
+          currency: 'USD',
+          originalFareCents: Math.round(
+            (activeRide.originalCalculatedFare || activeRide.rideAmount) * 100,
+          ),
+          fareCents: amountCents,
+          fareOverrideApplied: true,
+        },
+        Msg.FARE_OVERRIDE_SUCCESS,
+      );
+    }
+
+    // 9. Preserve original calculated fare if not already recorded
+    if (!activeRide.originalCalculatedFare) {
+      activeRide.originalCalculatedFare =
+        activeRide.rideAmount || newFareDollars;
+    }
+
+    const originalFare = activeRide.originalCalculatedFare;
+    activeRide.rideAmount = newFareDollars;
+    activeRide.fareOverrideApplied = true;
+    activeRide.fareOverrideAmount = newFareDollars;
+    activeRide.fareOverrideDifference = Number(
+      (newFareDollars - originalFare).toFixed(2),
+    );
+    activeRide.fareOverrideByDriverId = driver.driverId
+      ? String(driver.driverId)
+      : driver._id.toString();
+    activeRide.fareOverrideAt = new Date();
+    activeRide.paymentStatus = 'PENDING';
+    activeRide.paymentType = 'OVERRIDE';
+    activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+
+    driver.activeRideId = activeRide._id.toString();
+    driver.isAvailable = false;
+    driver.ongoingRides = 'YES';
+
+    await activeRide.save();
+    await driver.save();
+
+    return new ApiResponse(
+      200,
+      {
+        action: 'FARE_OVERRIDE_SUCCESS',
+        tripNumber: activeRide.tripNumber,
+        workflowStage: 'AWAITING_PAYMENT',
+        paymentStatus: 'PENDING',
+        currency: 'USD',
+        originalFareCents: Math.round(originalFare * 100),
+        fareCents: amountCents,
+        fareOverrideApplied: true,
+      },
+      Msg.FARE_OVERRIDE_SUCCESS,
+    );
   }
 
   private dispatchLocks = new Map<
@@ -438,7 +680,15 @@ export class IvrService {
 
   async getDriverStatus(mobileNumber: string) {
     try {
-      const driver = await this.driverModel.findOne({ mobileNumber });
+      const numberDigits = (mobileNumber || '').replace(/\D/g, '');
+      const driver = await this.driverModel.findOne({
+        $or: [
+          { mobileNumber },
+          ...(numberDigits && numberDigits.length >= 7
+            ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
+            : []),
+        ],
+      });
 
       if (!driver) {
         return new ApiResponse(
@@ -448,7 +698,7 @@ export class IvrService {
         );
       }
 
-      let workflowStage = 'NO_ACTIVE_TRIP';
+      let workflowStage = 'IDLE';
       let activeTripData: any = null;
 
       let ride = driver.activeRideId
@@ -461,6 +711,7 @@ export class IvrService {
           .findOne({
             $or: [
               { driverId: driver._id.toString() },
+              { driverId: String(driver.driverId) },
               { driverNumber: driver.mobileNumber },
             ],
             rideStatus: {
@@ -468,6 +719,9 @@ export class IvrService {
                 RideStatus.ACCEPTED,
                 RideStatus.STARTED,
                 RideStatus.PAYMENT_PENDING,
+                'ACCEPTED',
+                'STARTED',
+                'PAYMENT_PENDING',
               ],
             },
           })
@@ -490,6 +744,7 @@ export class IvrService {
           queueName: ride.queueName || '',
           recordingUrl: ride.recordingUrl || '',
           rideStatus: ride.rideStatus || '',
+          status: ride.rideStatus || '',
           rideStartDateTime: ride.rideStartDateTime || '',
           rideCompleteDateTime: ride.rideCompleteDateTime || '',
         };
@@ -498,11 +753,13 @@ export class IvrService {
           workflowStage = 'ASSIGNED_NOT_STARTED';
           activeTripData = {
             ...baseTripData,
+            fareOverrideApplied: false,
           };
         } else if (ride.rideStatus === RideStatus.STARTED) {
           workflowStage = 'IN_PROGRESS';
           activeTripData = {
             ...baseTripData,
+            fareOverrideApplied: false,
           };
         } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
           workflowStage = 'AWAITING_PAYMENT';
@@ -514,41 +771,86 @@ export class IvrService {
             durationMinutes = Math.ceil((end - start) / 60000);
           }
 
-          const fareDetails =
-            await this.pricingService.calculateZoneFare(
-              ride.selectedZone || '1',
-              durationMinutes,
-              ride.rideStartDateTime,
-            );
+          let currency = 'USD';
+          let baseFare = 0;
+          let freeMinutes = 0;
+          let baseTimeMinutes = 0;
+          let perMinuteRate = 0;
+          let extraMinutes = 0;
+          let calculatedFare = ride.originalCalculatedFare || ride.rideAmount || 0;
+
+          if (ride.selectedZone) {
+            try {
+              const fareDetails = await this.pricingService.calculateZoneFare(
+                ride.selectedZone,
+                durationMinutes,
+                ride.rideStartDateTime,
+              );
+              currency = fareDetails.currency || 'USD';
+              baseFare = fareDetails.baseFare;
+              freeMinutes = fareDetails.freeMinutes;
+              baseTimeMinutes = fareDetails.baseTimeMinutes;
+              perMinuteRate = fareDetails.perMinuteRate;
+              extraMinutes = fareDetails.extraMinutes;
+              if (!ride.originalCalculatedFare && fareDetails.calculatedFare) {
+                ride.originalCalculatedFare = fareDetails.calculatedFare;
+                calculatedFare = fareDetails.calculatedFare;
+                if (!ride.fareOverrideApplied) {
+                  ride.rideAmount = fareDetails.calculatedFare;
+                }
+                await ride.save();
+              }
+            } catch (err) {
+              console.log('Failed calculating zone fare for status', err.message);
+            }
+          }
+
+          const originalFare = ride.originalCalculatedFare || calculatedFare;
+          const currentFare =
+            ride.rideAmount !== undefined && ride.rideAmount !== null
+              ? ride.rideAmount
+              : originalFare;
+          const originalFareCents = Math.round(originalFare * 100);
+          const fareCents = Math.round(currentFare * 100);
 
           activeTripData = {
             ...baseTripData,
+            tripNumber: ride.tripNumber,
+            status: ride.rideStatus,
+            currency,
             durationMinutes,
-            selectedZone: fareDetails.zone,
-            baseFare: fareDetails.baseFare,
-            freeMinutes: fareDetails.freeMinutes,
-            baseTimeMinutes: fareDetails.baseTimeMinutes,
-            perMinuteRate: fareDetails.perMinuteRate,
-            extraMinutes: fareDetails.extraMinutes,
-            calculatedFare: fareDetails.calculatedFare,
-            finalFare: fareDetails.finalFare,
-            currency: fareDetails.currency,
+            selectedZone: ride.selectedZone,
+            baseFare,
+            freeMinutes,
+            baseTimeMinutes,
+            perMinuteRate,
+            extraMinutes,
+            calculatedFare: originalFare,
+            finalFare: currentFare,
+            fareAmount: currentFare,
+            originalFareCents,
+            fareCents,
+            fareOverrideApplied: !!ride.fareOverrideApplied,
           };
         }
       }
+
+      const hasActiveTrip = !!ride && !!activeTripData;
 
       return new ApiResponse(
         200,
         {
           registered: true,
-          driverId: driver.driverId,
+          driverId: driver.driverId || driver._id,
           driverName: driver.driverName,
           phoneNumber: driver.mobileNumber,
           loggedIn: driver.isLoggedIn,
           serviceType: driver.queueType,
           available: driver.isAvailable,
           workflowStage,
-          activeTrip: activeTripData,
+          activeTrip: hasActiveTrip,
+          trip: hasActiveTrip ? activeTripData : null,
+          activeTripData: activeTripData || null,
         },
         'Driver status fetched',
       );

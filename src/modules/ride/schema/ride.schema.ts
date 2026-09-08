@@ -88,6 +88,25 @@ export class Ride {
 
   @Prop({ type: Object })
   paymentGatewayResponse: any;
+
+  // Fare Override Audit Fields
+  @Prop({ type: Number })
+  originalCalculatedFare: number;
+
+  @Prop({ type: Boolean, default: false })
+  fareOverrideApplied: boolean;
+
+  @Prop({ type: Number })
+  fareOverrideAmount: number;
+
+  @Prop({ type: Number })
+  fareOverrideDifference: number;
+
+  @Prop()
+  fareOverrideByDriverId: string;
+
+  @Prop({ type: Date })
+  fareOverrideAt: Date;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);
