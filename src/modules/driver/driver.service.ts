@@ -9,6 +9,7 @@ import { RideStatus } from 'src/common/enums/ride/ride-enum';
 import { PaymentType } from 'src/common/enums/payment/payment-type';
 
 import { UpdateDriverBatchDto } from './dto/update-batch.dto';
+import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
 
 @Injectable()
 export class DriverService {
@@ -433,6 +434,24 @@ export class DriverService {
       return new ApiResponse(200, driverObj, Msg.DRIVER_BATCH_UPDATED);
     } catch (error) {
       console.log(`Error while updating batch `, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async updateBatchesBulk(dto: BulkUpdateDriverBatchDto) {
+    try {
+      const result = await this.driverModel.updateMany(
+        { _id: { $in: dto.driverIds } },
+        { $set: { batch: dto.batchNumber } },
+      );
+
+      return new ApiResponse(
+        200,
+        { updatedCount: result.modifiedCount },
+        Msg.DRIVER_BATCHES_UPDATED,
+      );
+    } catch (error) {
+      console.log(`Error while updating driver batches in bulk `, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

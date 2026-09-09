@@ -25,6 +25,7 @@ import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateDriverEarningsDto } from './dto/update-driver-earnings.dto';
 import { UpdateDriverBatchDto } from './dto/update-batch.dto';
+import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
 
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RoleGuard)
@@ -100,6 +101,14 @@ export class DriverController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async updateDriverBatch(@Body() UpdateDriverBatchDto: UpdateDriverBatchDto) {
     return this.driverService.updateTheBatch(UpdateDriverBatchDto);
+  }
+
+  @Put('/update/batch/bulk')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async updateDriverBatchesBulk(
+    @Body() bulkUpdateDriverBatchDto: BulkUpdateDriverBatchDto,
+  ) {
+    return this.driverService.updateBatchesBulk(bulkUpdateDriverBatchDto);
   }
 
   @Put('/update/:id')

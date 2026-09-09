@@ -13,7 +13,7 @@ export class UpdateDriverBatchDto {
   driverId: string;
 
   @ApiProperty({
-    example: 4096.5,
+    example: 1,
     description: 'Batch Number',
     required: true,
   })
