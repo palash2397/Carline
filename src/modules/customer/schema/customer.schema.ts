@@ -15,6 +15,9 @@ export class Customer {
   email: string;
 
   @Prop()
+  address: string;
+
+  @Prop()
   fullAddress: string;
 
   @Prop()
