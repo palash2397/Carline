@@ -10,7 +10,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { DriverService } from './driver.service';
-import { ApiBearerAuth, ApiExcludeEndpoint, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiExcludeEndpoint,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import { RoleGuard } from '../auth/roles/roles.guard';
 import { Roles } from 'src/modules/auth/roles/roles.decorator';
@@ -19,6 +24,7 @@ import { JwtAuthGuard } from '../auth/jwt/jwt-auth.guard';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateDriverEarningsDto } from './dto/update-driver-earnings.dto';
+import { UpdateDriverBatchDto } from './dto/update-batch.dto';
 
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RoleGuard)
@@ -88,6 +94,12 @@ export class DriverController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async addDriver(@Body() createDriverDto: CreateDriverDto) {
     return this.driverService.createDriver(createDriverDto);
+  }
+
+  @Put('/update/batch')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async updateDriverBatch(@Body() UpdateDriverBatchDto: UpdateDriverBatchDto) {
+    return this.driverService.updateTheBatch(UpdateDriverBatchDto);
   }
 
   @Put('/update/:id')

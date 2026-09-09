@@ -8,6 +8,8 @@ import { Msg } from 'src/helpers/responseMsg';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
 import { PaymentType } from 'src/common/enums/payment/payment-type';
 
+import { UpdateDriverBatchDto } from './dto/update-batch.dto';
+
 @Injectable()
 export class DriverService {
   constructor(
@@ -409,6 +411,28 @@ export class DriverService {
 
       return new ApiResponse(200, responsePayload, Msg.DATA_UPDATED);
     } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async updateTheBatch(dto: UpdateDriverBatchDto) {
+    try {
+      const driver = await this.driverModel.findOne({
+        _id: dto.driverId,
+      });
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+      driver.batch = dto.batchNumber;
+      await driver.save();
+      let driverObj = {
+        _id: driver._id,
+        driverId: driver.driverId,
+        batchNumber: driver.batch,
+      };
+      return new ApiResponse(200, driverObj, Msg.DRIVER_BATCH_UPDATED);
+    } catch (error) {
+      console.log(`Error while updating batch `, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

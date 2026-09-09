@@ -102,6 +102,8 @@ export const Msg = {
   DRIVER_NOT_ASSIGNED: 'Driver not assigned',
   DRIVERS_FETCHED: 'Drivers fetched successfully',
   DRIVER_UNRECOGNIZED: 'Unrecognized driver',
+  DRIVER_BATCH_UPDATED: 'Driver batch updated successfully',
+  DRIVER_BATCHES_UPDATED: 'Driver batches updated successfully',
 
   // Route
   ROUTE_NOT_FOUND: 'Route not found',
