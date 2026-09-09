@@ -27,6 +27,7 @@ import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateDriverEarningsDto } from './dto/update-driver-earnings.dto';
 import { UpdateDriverBatchDto } from './dto/update-batch.dto';
 import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
+import { DriverSettlementDto } from './dto/driver-settlement.dto';
 
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RoleGuard)
@@ -84,12 +85,47 @@ export class DriverController {
     return this.driverService.getDriverEarningsSummary(id);
   }
 
+  @Get('/:id/earnings-history')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (default: 10)',
+  })
+  @ApiQuery({
+    name: 'actionType',
+    required: false,
+    enum: ['ADJUSTMENT', 'SETTLEMENT', 'MANUAL_OVERRIDE'],
+    description: 'Filter by action type',
+  })
+  async getDriverEarningsHistory(
+    @Param('id') id: string,
+    @Query() query: any,
+  ) {
+    return this.driverService.getDriverEarningsHistory(id, query);
+  }
+
   @Put('/earnings')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   async updateDriverEarnings(
     @Body() updateDriverEarningsDto: UpdateDriverEarningsDto,
   ) {
     return this.driverService.updateDriverEarnings(updateDriverEarningsDto);
+  }
+
+  @Post('/settlement')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async processDriverSettlement(
+    @Body() driverSettlementDto: DriverSettlementDto,
+  ) {
+    return this.driverService.processDriverSettlement(driverSettlementDto);
   }
 
   @Post('/add')

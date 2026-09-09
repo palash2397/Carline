@@ -105,6 +105,8 @@ export const Msg = {
   DRIVER_BATCH_UPDATED: 'Driver batch updated successfully',
   DRIVER_BATCHES_UPDATED: 'Driver batches updated successfully',
   DRIVER_DELETED: 'Driver deleted successfully',
+  DRIVER_EARNINGS_HISTORY_FETCHED: 'Driver earnings history fetched successfully',
+  DRIVER_SETTLEMENT_PROCESSED: 'Driver settlement processed successfully',
 
   // Route
   ROUTE_NOT_FOUND: 'Route not found',

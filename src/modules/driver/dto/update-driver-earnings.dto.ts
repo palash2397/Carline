@@ -4,7 +4,8 @@ import { IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
 export class UpdateDriverEarningsDto {
   @ApiProperty({
     example: '691379738f253f6ef929c88d',
-    description: 'Driver ID (Mongo ObjectId, numeric driverId, or mobile number)',
+    description:
+      'Driver ID (Mongo ObjectId, numeric driverId, or mobile number)',
     required: true,
   })
   @IsNotEmpty()
@@ -45,4 +46,12 @@ export class UpdateDriverEarningsDto {
   @IsOptional()
   @IsNumber()
   earnings?: number;
+
+  @ApiProperty({
+    example: 'Manual adjustment per audit report',
+    description: 'Note or reason for the adjustment',
+    required: false,
+  })
+  @IsOptional()
+  note?: string;
 }

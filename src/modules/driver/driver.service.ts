@@ -11,11 +11,19 @@ import { PaymentType } from 'src/common/enums/payment/payment-type';
 import { UpdateDriverBatchDto } from './dto/update-batch.dto';
 import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
+import { DriverSettlementDto } from './dto/driver-settlement.dto';
+import {
+  DriverEarningsAudit,
+  DriverEarningsAuditDocument,
+} from './schema/driver-earnings-audit.schema';
+import { UserRole } from 'src/common/enums/user/role.enum';
 
 @Injectable()
 export class DriverService {
   constructor(
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
+    @InjectModel(DriverEarningsAudit.name)
+    private driverEarningsAuditModel: Model<DriverEarningsAuditDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
   ) {}
 
@@ -284,27 +292,16 @@ export class DriverService {
 
   async updateDriverEarnings(dto: any) {
     try {
-      const driverIdentifier = dto.driverId || dto.id || dto._id;
-      if (!driverIdentifier) {
-        return new ApiResponse(400, {}, Msg.ID_REQUIRED);
-      }
-
-      let driver: DriverDocument | null = null;
-      if (isValidObjectId(driverIdentifier)) {
-        driver = await this.driverModel.findById(driverIdentifier);
-      }
-      if (!driver) {
-        driver = await this.driverModel.findOne({
-          $or: [
-            { driverId: parseInt(driverIdentifier) || 0 },
-            { mobileNumber: String(driverIdentifier) },
-          ],
-        });
-      }
-
+      const driver = await this.driverModel.findById(dto.driverId);
       if (!driver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
+
+      const previousEarningsWithCash = Number(driver.earningsWithCash || 0);
+      const previousEarningsWithoutCash = Number(
+        driver.earningsWithoutCash || 0,
+      );
+      const previousTotalEarnings = Number(driver.totalEarnings || 0);
 
       const inputWithCash =
         dto.earningsWithCash !== undefined
@@ -353,6 +350,35 @@ export class DriverService {
       driver.isEarningsManuallySet = true;
       await driver.save();
 
+      const auditLog = new this.driverEarningsAuditModel({
+        driverObjectId: driver._id.toString(),
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        mobileNumber: driver.mobileNumber,
+        actionType:
+          dto.settlementType === 'SETTLEMENT' ? 'SETTLEMENT' : 'ADJUSTMENT',
+        previousEarningsWithCash,
+        newEarningsWithCash: driver.earningsWithCash,
+        previousEarningsWithoutCash,
+        newEarningsWithoutCash: driver.earningsWithoutCash,
+        previousTotalEarnings,
+        newTotalEarnings: driver.totalEarnings,
+        cashDifference: Number(
+          (driver.earningsWithCash - previousEarningsWithCash).toFixed(2),
+        ),
+        nonCashDifference: Number(
+          (driver.earningsWithoutCash - previousEarningsWithoutCash).toFixed(2),
+        ),
+        totalDifference: Number(
+          (driver.totalEarnings - previousTotalEarnings).toFixed(2),
+        ),
+        settlementAmount: dto.amount || dto.settlementAmount || 0,
+        settlementMethod: dto.paymentMethod || dto.settlementMethod || null,
+        note: dto.note || 'Manual earnings adjustment by admin',
+        updatedBy: UserRole.ADMIN,
+      });
+      await auditLog.save();
+
       const responsePayload = {
         _id: driver._id,
         driverId: driver.driverId,
@@ -360,6 +386,7 @@ export class DriverService {
         earningsWithCash: driver.earningsWithCash,
         earningsWithoutCash: driver.earningsWithoutCash,
         totalEarnings: driver.totalEarnings,
+        auditId: auditLog._id,
         financialSummary: {
           earningsWithCash: driver.earningsWithCash,
           earningsWithoutCash: driver.earningsWithoutCash,
@@ -371,6 +398,200 @@ export class DriverService {
 
       return new ApiResponse(200, responsePayload, Msg.DATA_UPDATED);
     } catch (error) {
+      console.log(`Error while updating driver earnings:`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async processDriverSettlement(dto: DriverSettlementDto) {
+    try {
+      const driverIdentifier = dto.driverId;
+      if (!driverIdentifier) {
+        return new ApiResponse(400, {}, Msg.ID_REQUIRED);
+      }
+
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(driverIdentifier)) {
+        driver = await this.driverModel.findById(driverIdentifier);
+      }
+      if (!driver) {
+        driver = await this.driverModel.findOne({
+          $or: [
+            { driverId: parseInt(driverIdentifier) || 0 },
+            { mobileNumber: String(driverIdentifier) },
+          ],
+        });
+      }
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      const settleAmount = Number(dto.amount);
+      if (isNaN(settleAmount) || settleAmount <= 0) {
+        return new ApiResponse(
+          400,
+          {},
+          'Valid positive settlement amount is required',
+        );
+      }
+
+      const previousEarningsWithCash = Number(driver.earningsWithCash || 0);
+      const previousEarningsWithoutCash = Number(
+        driver.earningsWithoutCash || 0,
+      );
+      const previousTotalEarnings = Number(driver.totalEarnings || 0);
+
+      const settleTarget = (dto.settlementType || 'TOTAL').toUpperCase();
+
+      let newCash = previousEarningsWithCash;
+      let newNonCash = previousEarningsWithoutCash;
+
+      if (settleTarget === 'CASH') {
+        newCash = Math.max(
+          0,
+          Number((previousEarningsWithCash - settleAmount).toFixed(2)),
+        );
+      } else if (settleTarget === 'NON_CASH' || settleTarget === 'CARD') {
+        newNonCash = Math.max(
+          0,
+          Number((previousEarningsWithoutCash - settleAmount).toFixed(2)),
+        );
+      } else {
+        // TOTAL: deduct from non-cash first, then cash
+        let rem = settleAmount;
+        if (newNonCash >= rem) {
+          newNonCash = Number((newNonCash - rem).toFixed(2));
+          rem = 0;
+        } else {
+          rem = Number((rem - newNonCash).toFixed(2));
+          newNonCash = 0;
+          newCash = Math.max(0, Number((newCash - rem).toFixed(2)));
+        }
+      }
+
+      driver.earningsWithCash = newCash;
+      driver.earningsWithoutCash = newNonCash;
+      driver.totalEarnings = Number((newCash + newNonCash).toFixed(2));
+      driver.isEarningsManuallySet = true;
+      await driver.save();
+
+      // Record settlement audit log
+      const auditLog = new this.driverEarningsAuditModel({
+        driverObjectId: driver._id.toString(),
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        mobileNumber: driver.mobileNumber,
+        actionType: 'SETTLEMENT',
+        previousEarningsWithCash,
+        newEarningsWithCash: driver.earningsWithCash,
+        previousEarningsWithoutCash,
+        newEarningsWithoutCash: driver.earningsWithoutCash,
+        previousTotalEarnings,
+        newTotalEarnings: driver.totalEarnings,
+        cashDifference: Number(
+          (driver.earningsWithCash - previousEarningsWithCash).toFixed(2),
+        ),
+        nonCashDifference: Number(
+          (driver.earningsWithoutCash - previousEarningsWithoutCash).toFixed(2),
+        ),
+        totalDifference: Number(
+          (driver.totalEarnings - previousTotalEarnings).toFixed(2),
+        ),
+        settlementAmount: settleAmount,
+        settlementMethod: dto.paymentMethod || 'BANK_TRANSFER',
+        note: dto.note || `Settlement payout of $${settleAmount}`,
+        updatedBy: dto.updatedBy || 'ADMIN',
+      });
+      await auditLog.save();
+
+      return new ApiResponse(
+        200,
+        {
+          driver: {
+            _id: driver._id,
+            driverId: driver.driverId,
+            driverName: driver.driverName,
+            earningsWithCash: driver.earningsWithCash,
+            earningsWithoutCash: driver.earningsWithoutCash,
+            totalEarnings: driver.totalEarnings,
+          },
+          audit: auditLog,
+        },
+        Msg.DRIVER_SETTLEMENT_PROCESSED,
+      );
+    } catch (error) {
+      console.log(`Error while processing driver settlement:`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async getDriverEarningsHistory(driverIdentifier: string, query: any) {
+    try {
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(driverIdentifier)) {
+        driver = await this.driverModel.findById(driverIdentifier);
+      }
+      if (!driver) {
+        driver = await this.driverModel.findOne({
+          $or: [
+            { driverId: parseInt(driverIdentifier) || 0 },
+            { mobileNumber: String(driverIdentifier) },
+          ],
+        });
+      }
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      const page = parseInt(query.page) || 1;
+      const limit = parseInt(query.limit) || 10;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {
+        $or: [
+          { driverObjectId: driver._id.toString() },
+          { driverId: driver.driverId },
+        ],
+      };
+
+      if (query.actionType) {
+        filter.actionType = query.actionType.toUpperCase();
+      }
+
+      const [total, history] = await Promise.all([
+        this.driverEarningsAuditModel.countDocuments(filter),
+        this.driverEarningsAuditModel
+          .find(filter)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .exec(),
+      ]);
+
+      return new ApiResponse(
+        200,
+        {
+          driver: {
+            _id: driver._id,
+            driverId: driver.driverId,
+            driverName: driver.driverName,
+            mobileNumber: driver.mobileNumber,
+            currentEarningsWithCash: driver.earningsWithCash,
+            currentEarningsWithoutCash: driver.earningsWithoutCash,
+            currentTotalEarnings: driver.totalEarnings,
+          },
+          history,
+          total,
+          page,
+          limit,
+        },
+        Msg.DRIVER_EARNINGS_HISTORY_FETCHED,
+      );
+    } catch (error) {
+      console.log(`Error while fetching driver earnings history:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
