@@ -1,14 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsMongoId, IsNumber, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
 
 export class UpdateDriverEarningsDto {
   @ApiProperty({
     example: '691379738f253f6ef929c88d',
-    description: 'Driver ID',
+    description: 'Driver ID (Mongo ObjectId, numeric driverId, or mobile number)',
     required: true,
   })
-  @IsMongoId()
-  driverId: string;
+  @IsNotEmpty()
+  driverId: any;
 
   @ApiProperty({
     example: 4096.5,
@@ -36,4 +36,13 @@ export class UpdateDriverEarningsDto {
   @IsOptional()
   @IsNumber()
   totalEarnings?: number;
+
+  @ApiProperty({
+    example: 4105.5,
+    description: 'Total driver earnings alias',
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  earnings?: number;
 }

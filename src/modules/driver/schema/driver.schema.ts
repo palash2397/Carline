@@ -80,6 +80,9 @@ export class Driver {
   @Prop({ default: 'On' })
   totalEarningsStatus: string;
 
+  @Prop({ type: Boolean, default: false })
+  isEarningsManuallySet: boolean;
+
   @Prop({ default: 'Disabled' })
   laterTripTrips: string;
 

@@ -85,10 +85,12 @@ export class DriverService {
       ? latestTrip.rideCompleteDateTime || latestTrip['updatedAt']
       : driver.lastTripTaken || null;
 
-    // Update driver document fields in DB
-    driver.earningsWithCash = Number(earningsWithCash.toFixed(2));
-    driver.earningsWithoutCash = Number(earningsWithoutCash.toFixed(2));
-    driver.totalEarnings = Number(totalEarnings.toFixed(2));
+    // Update driver document fields in DB if not manually set by admin
+    if (!driver.isEarningsManuallySet) {
+      driver.earningsWithCash = Number(earningsWithCash.toFixed(2));
+      driver.earningsWithoutCash = Number(earningsWithoutCash.toFixed(2));
+      driver.totalEarnings = Number(totalEarnings.toFixed(2));
+    }
     driver.ongoingRides = ongoingRides;
     if (lastTripTaken) {
       driver.lastTripTaken = new Date(lastTripTaken);
@@ -96,9 +98,9 @@ export class DriverService {
     await driver.save();
 
     return {
-      earningsWithCash: Number(earningsWithCash.toFixed(2)),
-      earningsWithoutCash: Number(earningsWithoutCash.toFixed(2)),
-      totalEarnings: Number(totalEarnings.toFixed(2)),
+      earningsWithCash: driver.earningsWithCash,
+      earningsWithoutCash: driver.earningsWithoutCash,
+      totalEarnings: driver.totalEarnings,
       ongoingRides,
       lastTripTaken,
     };
@@ -195,9 +197,38 @@ export class DriverService {
           .exec(),
       ]);
 
+      const formattedData = data.map((d: any) => {
+        const withCash =
+          d.earningsWithCash !== undefined && d.earningsWithCash !== null
+            ? Number(d.earningsWithCash)
+            : 0;
+        const withoutCash =
+          d.earningsWithoutCash !== undefined && d.earningsWithoutCash !== null
+            ? Number(d.earningsWithoutCash)
+            : 0;
+        const totalEarn =
+          d.totalEarnings !== undefined && d.totalEarnings !== null
+            ? Number(d.totalEarnings)
+            : Number((withCash + withoutCash).toFixed(2));
+
+        return {
+          ...d,
+          earningsWithCash: withCash,
+          earningsWithoutCash: withoutCash,
+          totalEarnings: totalEarn,
+          financialSummary: {
+            earningsWithCash: withCash,
+            earningsWithoutCash: withoutCash,
+            totalEarnings: totalEarn,
+            ongoingRides: d.ongoingRides || 'NO',
+            lastTripTaken: d.lastTripTaken || null,
+          },
+        };
+      });
+
       return new ApiResponse(
         200,
-        { data, total, page, limit },
+        { data: formattedData, total, page, limit },
         Msg.DATA_FETCHED,
       );
     } catch (error) {
@@ -229,6 +260,14 @@ export class DriverService {
   async updateDriver(id: string, dto: any) {
     try {
       if (
+        dto.earningsWithCash !== undefined ||
+        dto.earningsWithoutCash !== undefined ||
+        dto.totalEarnings !== undefined
+      ) {
+        dto.isEarningsManuallySet = true;
+      }
+
+      if (
         (dto.earningsWithCash !== undefined ||
           dto.earningsWithoutCash !== undefined) &&
         dto.totalEarnings === undefined
@@ -236,6 +275,10 @@ export class DriverService {
         let existingDriver: DriverDocument | null = null;
         if (isValidObjectId(id)) {
           existingDriver = await this.driverModel.findById(id);
+        } else {
+          existingDriver = await this.driverModel.findOne({
+            $or: [{ driverId: parseInt(id) || 0 }, { mobileNumber: id }],
+          });
         }
         const withCash =
           dto.earningsWithCash !== undefined
@@ -248,11 +291,22 @@ export class DriverService {
         dto.totalEarnings = Number((withCash + withoutCash).toFixed(2));
       }
 
-      const updatedDriver = await this.driverModel.findByIdAndUpdate(
-        id,
-        { $set: dto },
-        { new: true, runValidators: true },
-      );
+      let updatedDriver: any = null;
+      if (isValidObjectId(id)) {
+        updatedDriver = await this.driverModel.findByIdAndUpdate(
+          id,
+          { $set: dto },
+          { new: true, runValidators: true },
+        );
+      } else {
+        updatedDriver = await this.driverModel.findOneAndUpdate(
+          {
+            $or: [{ driverId: parseInt(id) || 0 }, { mobileNumber: id }],
+          },
+          { $set: dto },
+          { new: true, runValidators: true },
+        );
+      }
 
       if (!updatedDriver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
@@ -266,25 +320,67 @@ export class DriverService {
 
   async updateDriverEarnings(dto: any) {
     try {
-      const driver = await this.driverModel.findById(dto.driverId);
+      const driverIdentifier = dto.driverId || dto.id || dto._id;
+      if (!driverIdentifier) {
+        return new ApiResponse(400, {}, 'driverId is required');
+      }
+
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(driverIdentifier)) {
+        driver = await this.driverModel.findById(driverIdentifier);
+      }
+      if (!driver) {
+        driver = await this.driverModel.findOne({
+          $or: [
+            { driverId: parseInt(driverIdentifier) || 0 },
+            { mobileNumber: String(driverIdentifier) },
+          ],
+        });
+      }
 
       if (!driver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
 
-      if (dto.earningsWithCash !== undefined) {
-        driver.earningsWithCash = Number(dto.earningsWithCash);
-      }
+      // Handle aliases for with-cash earnings
+      const inputWithCash =
+        dto.earningsWithCash !== undefined
+          ? dto.earningsWithCash
+          : dto.cashEarnings !== undefined
+            ? dto.cashEarnings
+            : dto.cash;
 
-      if (dto.earningsWithoutCash !== undefined) {
-        driver.earningsWithoutCash = Number(dto.earningsWithoutCash);
-      }
-
-      if (dto.totalEarnings !== undefined) {
-        driver.totalEarnings = Number(dto.totalEarnings);
-      } else if (
-        dto.earningsWithCash !== undefined ||
+      // Handle aliases for without-cash earnings
+      const inputWithoutCash =
         dto.earningsWithoutCash !== undefined
+          ? dto.earningsWithoutCash
+          : dto.cardEarnings !== undefined
+            ? dto.cardEarnings
+            : dto.nonCashEarnings !== undefined
+              ? dto.nonCashEarnings
+              : dto.card;
+
+      // Handle aliases for total earnings
+      const inputTotal =
+        dto.totalEarnings !== undefined
+          ? dto.totalEarnings
+          : dto.earnings !== undefined
+            ? dto.earnings
+            : dto.totalEarning;
+
+      if (inputWithCash !== undefined && inputWithCash !== null) {
+        driver.earningsWithCash = Number(inputWithCash);
+      }
+
+      if (inputWithoutCash !== undefined && inputWithoutCash !== null) {
+        driver.earningsWithoutCash = Number(inputWithoutCash);
+      }
+
+      if (inputTotal !== undefined && inputTotal !== null) {
+        driver.totalEarnings = Number(inputTotal);
+      } else if (
+        inputWithCash !== undefined ||
+        inputWithoutCash !== undefined
       ) {
         driver.totalEarnings = Number(
           (
@@ -293,20 +389,26 @@ export class DriverService {
         );
       }
 
+      driver.isEarningsManuallySet = true;
       await driver.save();
 
-      return new ApiResponse(
-        200,
-        {
-          _id: driver._id,
-          driverId: driver.driverId,
-          driverName: driver.driverName,
+      const responsePayload = {
+        _id: driver._id,
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        earningsWithCash: driver.earningsWithCash,
+        earningsWithoutCash: driver.earningsWithoutCash,
+        totalEarnings: driver.totalEarnings,
+        financialSummary: {
           earningsWithCash: driver.earningsWithCash,
           earningsWithoutCash: driver.earningsWithoutCash,
           totalEarnings: driver.totalEarnings,
+          ongoingRides: driver.ongoingRides || 'NO',
+          lastTripTaken: driver.lastTripTaken || null,
         },
-        Msg.DATA_UPDATED,
-      );
+      };
+
+      return new ApiResponse(200, responsePayload, Msg.DATA_UPDATED);
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
