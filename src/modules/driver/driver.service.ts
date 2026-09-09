@@ -342,7 +342,6 @@ export class DriverService {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
 
-      // Handle aliases for with-cash earnings
       const inputWithCash =
         dto.earningsWithCash !== undefined
           ? dto.earningsWithCash
