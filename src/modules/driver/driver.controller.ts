@@ -8,6 +8,7 @@ import {
   Put,
   Query,
   UseGuards,
+  Delete,
 } from '@nestjs/common';
 import { DriverService } from './driver.service';
 import {
@@ -111,12 +112,15 @@ export class DriverController {
     return this.driverService.updateBatchesBulk(bulkUpdateDriverBatchDto);
   }
 
-  @Put('/update/:id')
+  @Put('/update')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  async updateDriver(
-    @Param('id') id: string,
-    @Body() updateDriverDto: UpdateDriverDto,
-  ) {
-    return this.driverService.updateDriver(id, updateDriverDto);
+  async updateDriver(@Body() updateDriverDto: UpdateDriverDto) {
+    return this.driverService.updateDriver(updateDriverDto);
+  }
+
+  @Delete('/delete/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async deleteDriver(@Param('id') id: string) {
+    return this.driverService.deleteDriver(id);
   }
 }

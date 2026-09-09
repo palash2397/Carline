@@ -10,6 +10,7 @@ import { PaymentType } from 'src/common/enums/payment/payment-type';
 
 import { UpdateDriverBatchDto } from './dto/update-batch.dto';
 import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
+import { UpdateDriverDto } from './dto/update-driver.dto';
 
 @Injectable()
 export class DriverService {
@@ -260,63 +261,23 @@ export class DriverService {
     }
   }
 
-  async updateDriver(id: string, dto: any) {
+  async updateDriver(dto: UpdateDriverDto) {
     try {
-      if (
-        dto.earningsWithCash !== undefined ||
-        dto.earningsWithoutCash !== undefined ||
-        dto.totalEarnings !== undefined
-      ) {
-        dto.isEarningsManuallySet = true;
-      }
+      const existingDriver = await this.driverModel.findById(dto.id);
 
-      if (
-        (dto.earningsWithCash !== undefined ||
-          dto.earningsWithoutCash !== undefined) &&
-        dto.totalEarnings === undefined
-      ) {
-        let existingDriver: DriverDocument | null = null;
-        if (isValidObjectId(id)) {
-          existingDriver = await this.driverModel.findById(id);
-        } else {
-          existingDriver = await this.driverModel.findOne({
-            $or: [{ driverId: parseInt(id) || 0 }, { mobileNumber: id }],
-          });
-        }
-        const withCash =
-          dto.earningsWithCash !== undefined
-            ? dto.earningsWithCash
-            : existingDriver?.earningsWithCash || 0;
-        const withoutCash =
-          dto.earningsWithoutCash !== undefined
-            ? dto.earningsWithoutCash
-            : existingDriver?.earningsWithoutCash || 0;
-        dto.totalEarnings = Number((withCash + withoutCash).toFixed(2));
-      }
-
-      let updatedDriver: any = null;
-      if (isValidObjectId(id)) {
-        updatedDriver = await this.driverModel.findByIdAndUpdate(
-          id,
-          { $set: dto },
-          { new: true, runValidators: true },
-        );
-      } else {
-        updatedDriver = await this.driverModel.findOneAndUpdate(
-          {
-            $or: [{ driverId: parseInt(id) || 0 }, { mobileNumber: id }],
-          },
-          { $set: dto },
-          { new: true, runValidators: true },
-        );
-      }
-
-      if (!updatedDriver) {
+      if (!existingDriver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
 
-      return new ApiResponse(200, updatedDriver, 'Driver updated successfully');
+      const updatedDriver = await this.driverModel.findByIdAndUpdate(
+        existingDriver._id,
+        { $set: dto },
+        { new: true, runValidators: true },
+      );
+
+      return new ApiResponse(200, updatedDriver, Msg.DRIVER_UPDATED);
     } catch (error) {
+      console.log(`Error while updating driver:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
@@ -352,7 +313,6 @@ export class DriverService {
             ? dto.cashEarnings
             : dto.cash;
 
-      // Handle aliases for without-cash earnings
       const inputWithoutCash =
         dto.earningsWithoutCash !== undefined
           ? dto.earningsWithoutCash
@@ -362,7 +322,6 @@ export class DriverService {
               ? dto.nonCashEarnings
               : dto.card;
 
-      // Handle aliases for total earnings
       const inputTotal =
         dto.totalEarnings !== undefined
           ? dto.totalEarnings
@@ -452,6 +411,27 @@ export class DriverService {
       );
     } catch (error) {
       console.log(`Error while updating driver batches in bulk `, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async deleteDriver(id: string) {
+    try {
+      const driver = await this.driverModel.findByIdAndDelete(id);
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      let driverObj = {
+        _id: driver._id,
+        driverId: driver.driverId,
+        mobileNumber: driver.mobileNumber,
+        driverName: driver.driverName,
+      };
+
+      return new ApiResponse(200, driverObj, Msg.DRIVER_DELETED);
+    } catch (error) {
+      console.log(`Error while deleting driver `, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

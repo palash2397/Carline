@@ -104,6 +104,7 @@ export const Msg = {
   DRIVER_UNRECOGNIZED: 'Unrecognized driver',
   DRIVER_BATCH_UPDATED: 'Driver batch updated successfully',
   DRIVER_BATCHES_UPDATED: 'Driver batches updated successfully',
+  DRIVER_DELETED: 'Driver deleted successfully',
 
   // Route
   ROUTE_NOT_FOUND: 'Route not found',
