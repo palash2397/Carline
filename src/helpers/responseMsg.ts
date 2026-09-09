@@ -181,4 +181,13 @@ export const Msg = {
   FARE_OVERRIDE_NOT_ALLOWED: 'Trip is not awaiting payment',
   NO_ACTIVE_TRIP: 'No active trip found',
   PAYMENT_ALREADY_COMPLETED: 'Trip payment is already completed',
+
+  // Customer
+  CUSTOMER_CREATED: 'Customer created successfully',
+  CUSTOMER_NOT_FOUND: 'Customer not found',
+  CUSTOMER_UPDATED: 'Customer updated successfully',
+  CUSTOMER_DELETED: 'Customer deleted successfully',
+  CUSTOMER_FETCHED: 'Customer fetched successfully',
+  CUSTOMERS_FETCHED: 'Customers fetched successfully',
+  CUSTOMER_ALREADY_EXISTS: 'Customer already exists',
 };

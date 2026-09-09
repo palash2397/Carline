@@ -7,6 +7,8 @@ import { Msg } from 'src/helpers/responseMsg';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+import { UserRole } from 'src/common/enums/user/role.enum';
+
 @Injectable()
 export class CustomerService {
   constructor(
@@ -40,9 +42,10 @@ export class CustomerService {
       return new ApiResponse(
         200,
         { data, total, page, limit },
-        Msg.DATA_FETCHED,
+        Msg.CUSTOMERS_FETCHED,
       );
     } catch (error) {
+      console.log(`error while getting the customer`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
@@ -50,7 +53,6 @@ export class CustomerService {
   async findOrCreateCustomer(phone: string, name?: string) {
     let customer = await this.customerModel.findOne({ mobileNumber: phone });
     if (!customer) {
-      // Find the highest customerId to auto-increment
       const lastCustomer = await this.customerModel
         .findOne()
         .sort({ customerId: -1 });
@@ -90,24 +92,11 @@ export class CustomerService {
 
   async createCustomer(dto: CreateCustomerDto) {
     try {
-      if (!dto.fullName || !dto.mobileNumber) {
-        return new ApiResponse(
-          400,
-          {},
-          'fullName and mobileNumber are required',
-        );
-      }
-
-      // Check if customer already exists with this mobile number
       const existing = await this.customerModel.findOne({
         mobileNumber: dto.mobileNumber,
       });
       if (existing) {
-        return new ApiResponse(
-          409,
-          {},
-          'Customer with this mobile number already exists',
-        );
+        return new ApiResponse(409, {}, Msg.CUSTOMER_ALREADY_EXISTS);
       }
 
       const lastCustomer = await this.customerModel
@@ -129,13 +118,14 @@ export class CustomerService {
         email: dto.email || '-',
         autoEmail: dto.autoEmail || 'Inactive',
         credit: dto.credit !== undefined ? Number(dto.credit) : 0,
-        createdBy: 'ADMIN',
+        createdBy: UserRole.ADMIN,
         createdOn: new Date().toLocaleString(),
       });
 
       await newCustomer.save();
-      return new ApiResponse(201, newCustomer, 'Customer created successfully');
+      return new ApiResponse(201, newCustomer, Msg.CUSTOMER_CREATED);
     } catch (error) {
+      console.log(`Error while creating the customer:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
@@ -166,28 +156,16 @@ export class CustomerService {
         { new: true, runValidators: true },
       );
 
-      return new ApiResponse(
-        200,
-        updatedCustomer,
-        'Customer profile updated successfully',
-      );
+      return new ApiResponse(200, updatedCustomer, Msg.CUSTOMER_UPDATED);
     } catch (error) {
+      console.log(`Error while updating the customer:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
 
   async deleteCustomer(id: string) {
     try {
-      let customer: CustomerDocument | null = null;
-      if (isValidObjectId(id)) {
-        customer = await this.customerModel.findById(id);
-      }
-      if (!customer) {
-        customer = await this.customerModel.findOne({
-          $or: [{ customerId: parseInt(id) || 0 }, { mobileNumber: id }],
-        });
-      }
-
+      const customer = await this.customerModel.findById(id);
       if (!customer) {
         return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
       }
@@ -200,9 +178,10 @@ export class CustomerService {
           customerId: customer.customerId,
           fullName: customer.fullName,
         },
-        'Customer deleted successfully',
+        Msg.CUSTOMER_DELETED,
       );
     } catch (error) {
+      console.log(`Error while deleting the customer:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
