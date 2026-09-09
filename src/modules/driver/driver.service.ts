@@ -322,7 +322,7 @@ export class DriverService {
     try {
       const driverIdentifier = dto.driverId || dto.id || dto._id;
       if (!driverIdentifier) {
-        return new ApiResponse(400, {}, 'driverId is required');
+        return new ApiResponse(400, {}, Msg.ID_REQUIRED);
       }
 
       let driver: DriverDocument | null = null;

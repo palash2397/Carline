@@ -78,14 +78,44 @@ export class IvrService {
       }
     }
 
-    // Check if this action is an override request
+    // 1. Explicit Trip Cancellation check - must NEVER trigger Fare Override
+    const isCancelAction =
+      dto.action === 'CANCEL_TRIP' ||
+      dto.action === 'CANCEL' ||
+      dto.action === 'TRIP_CANCEL';
+
+    if (isCancelAction) {
+      if (activeRide) {
+        activeRide.rideStatus = RideStatus.CANCELLED;
+        await activeRide.save();
+        await this.cancelOtherCalls(activeRide.tripNumber);
+      }
+
+      driver.activeRideId = '';
+      driver.isAvailable = true;
+      await driver.save();
+
+      return new ApiResponse(
+        200,
+        {
+          action: 'TRIP_CANCELLED',
+          tripNumber: activeRide ? activeRide.tripNumber : null,
+          workflowStage: 'CANCELLED',
+          rideStatus: 'CANCELLED',
+        },
+        'Trip cancelled successfully',
+      );
+    }
+
+    // Check if this action is an override request (ONLY if not cancelling)
     const isOverrideAction =
       dto.action === 'OVERRIDE_FARE' ||
       dto.action === 'OVERRIDE' ||
-      dto.overrideAmountCents !== undefined ||
-      dto.amountCents !== undefined ||
-      dto.overrideAmount !== undefined ||
-      dto.amount !== undefined;
+      ((dto.overrideAmountCents !== undefined ||
+        dto.amountCents !== undefined ||
+        dto.overrideAmount !== undefined ||
+        dto.amount !== undefined) &&
+        !dto.action);
 
     const hasOverrideDigits =
       activeRide &&
@@ -704,6 +734,26 @@ export class IvrService {
       let ride = driver.activeRideId
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
+
+      // If linked ride is not in an active workflow status, reset it
+      if (
+        ride &&
+        ![
+          RideStatus.ACCEPTED,
+          RideStatus.STARTED,
+          RideStatus.PAYMENT_PENDING,
+          'ACCEPTED',
+          'STARTED',
+          'PAYMENT_PENDING',
+        ].includes(ride.rideStatus as any)
+      ) {
+        ride = null;
+        if (driver.activeRideId) {
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          await driver.save();
+        }
+      }
 
       // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
       if (!ride) {

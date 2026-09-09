@@ -17,7 +17,11 @@ export class IvrDriverActionDto {
   @IsString()
   phoneNumber?: string;
 
-  @ApiProperty({ example: 'OVERRIDE_FARE', required: false })
+  @ApiProperty({
+    example: 'CANCEL_TRIP',
+    description: 'Driver action: CANCEL_TRIP or OVERRIDE_FARE',
+    required: false,
+  })
   @IsOptional()
   @IsString()
   action?: string;
