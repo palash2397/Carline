@@ -89,6 +89,12 @@ export class Ride {
   @Prop({ type: Object })
   paymentGatewayResponse: any;
 
+  @Prop()
+  cardLast4: string;
+
+  @Prop()
+  cardMasked: string;
+
   // Fare Override Audit Fields
   @Prop({ type: Number })
   originalCalculatedFare: number;

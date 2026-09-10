@@ -4,6 +4,11 @@ import { Model } from 'mongoose';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
+import { User, UserDocument } from '../user/schema/user.schema';
+import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
+import { IvrDriverCardDto } from './dto/ivr-driver-card.dto';
+import { PaymentStatus } from 'src/common/enums/payment/payment-status';
+import { PaymentType } from 'src/common/enums/payment/payment-type';
 import { ApiResponse } from '../../helpers/ApiResponse';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
 
@@ -18,9 +23,171 @@ export class IvrService {
   constructor(
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
     private pricingService: PricingService,
     private paymentService: PaymentService,
   ) {}
+
+  async processDriverCard(dto: IvrDriverCardDto) {
+    try {
+      const callerNumber = dto.callerNumber || '';
+      const numberDigits = callerNumber.replace(/\D/g, '');
+
+      const driver = await this.driverModel.findOne({
+        $or: [
+          { mobileNumber: callerNumber },
+          ...(numberDigits && numberDigits.length >= 7
+            ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
+            : []),
+        ],
+      });
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      const ride = await this.rideModel.findOne({ tripNumber: dto.tripNumber });
+      if (!ride) {
+        return new ApiResponse(404, {}, Msg.RIDE_NOT_FOUND);
+      }
+
+      // Connect with User and Customer
+      const customerPhone = ride.customerNumber || '';
+      const customerDigits = customerPhone.replace(/\D/g, '');
+
+      let user: UserDocument | null = null;
+      if (customerPhone) {
+        user = await this.userModel.findOne({
+          $or: [
+            { phoneNumber: customerPhone },
+            ...(customerDigits && customerDigits.length >= 7
+              ? [{ phoneNumber: { $regex: customerDigits, $options: 'i' } }]
+              : []),
+          ],
+        });
+      }
+
+      let customer: CustomerDocument | null = null;
+      if (customerPhone) {
+        customer = await this.customerModel.findOne({
+          $or: [
+            { mobileNumber: customerPhone },
+            ...(customerDigits && customerDigits.length >= 7
+              ? [{ mobileNumber: { $regex: customerDigits, $options: 'i' } }]
+              : []),
+          ],
+        });
+      }
+
+      // PCI compliant masking
+      const cleanCardNumber = dto.cardNumber.replace(/\D/g, '');
+      const last4 = cleanCardNumber.slice(-4) || '****';
+      const cardMasked = `**** **** **** ${last4}`;
+
+      ride.payment = 'CARD';
+      ride.paymentType = PaymentType.CREDIT_CARD;
+      ride.cardLast4 = last4;
+      ride.cardMasked = cardMasked;
+
+      let paymentResult: any = null;
+
+      // If expiration is provided and trip has an amount, attempt charging via USAePay
+      if (dto.expiration && ride.rideAmount > 0) {
+        try {
+          const cardholderName =
+            (user && `${user.firstName || ''} ${user.lastName || ''}`.trim()) ||
+            customer?.fullName ||
+            ride.customerName ||
+            'Valued Customer';
+
+          const chargeResponse = await this.paymentService.processCardSale({
+            amount: ride.rideAmount,
+            cardNumber: cleanCardNumber,
+            expiration: dto.expiration,
+            cvv: dto.cvv || '',
+            cardholder: cardholderName,
+            tripNumber: ride.tripNumber,
+            rideId: ride._id.toString(),
+          });
+
+          if (chargeResponse && chargeResponse.statusCode === 200) {
+            ride.paymentStatus = PaymentStatus.COMPLETED;
+            ride.ridePaymentDateTime = new Date().toISOString();
+            paymentResult = chargeResponse.data;
+          } else {
+            ride.paymentStatus = PaymentStatus.FAILED;
+            paymentResult = chargeResponse?.data;
+          }
+        } catch (payErr) {
+          console.log('Error while charging card via payment service in IVR:', payErr);
+        }
+      } else {
+        if (ride.paymentStatus !== PaymentStatus.COMPLETED) {
+          ride.paymentStatus = PaymentStatus.PENDING;
+        }
+      }
+
+      if (customer) {
+        customer.cardLast4 = last4;
+        customer.cardBrand = 'Credit Card';
+        await customer.save();
+      }
+
+      await ride.save();
+
+      return new ApiResponse(
+        200,
+        {
+          tripNumber: ride.tripNumber,
+          driver: {
+            _id: driver._id,
+            driverId: driver.driverId,
+            driverName: driver.driverName,
+            mobileNumber: driver.mobileNumber,
+          },
+          ride: {
+            _id: ride._id,
+            rideId: ride.rideId,
+            tripNumber: ride.tripNumber,
+            customerNumber: ride.customerNumber,
+            customerName: ride.customerName,
+            rideAmount: ride.rideAmount,
+            payment: ride.payment,
+            paymentType: ride.paymentType,
+            paymentStatus: ride.paymentStatus,
+            cardMasked: ride.cardMasked,
+            last4: ride.cardLast4,
+          },
+          user: user
+            ? {
+                _id: user._id,
+                name:
+                  `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+                  undefined,
+                phoneNumber: user.phoneNumber,
+                email: user.email,
+                role: user.role,
+              }
+            : null,
+          customer: customer
+            ? {
+                _id: customer._id,
+                customerId: customer.customerId,
+                fullName: customer.fullName,
+                mobileNumber: customer.mobileNumber,
+                cardLast4: customer.cardLast4,
+              }
+            : null,
+          paymentResult,
+        },
+        Msg.DRIVER_CARD_PROCESSED,
+      );
+    } catch (error) {
+      console.log('Error while processing driver card in IVR:', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
 
   async processDriverAction(dto: IvrDriverActionDto) {
     const callerNumber =

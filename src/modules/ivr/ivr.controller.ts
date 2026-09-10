@@ -10,6 +10,7 @@ import {
 import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
+import { IvrDriverCardDto } from './dto/ivr-driver-card.dto';
 import { IvrService } from './ivr.service';
 
 @ApiTags('IVR Webhooks')
@@ -22,6 +23,11 @@ import { IvrService } from './ivr.service';
 })
 export class IvrController {
   constructor(private readonly ivrService: IvrService) {}
+
+  @Post('/driver/card')
+  async handleDriverCard(@Body() dto: IvrDriverCardDto) {
+    return this.ivrService.processDriverCard(dto);
+  }
 
   @Post('/driver/action')
   async handleDriverAction(@Body() dto: IvrDriverActionDto) {

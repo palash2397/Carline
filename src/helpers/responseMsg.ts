@@ -179,6 +179,7 @@ export const Msg = {
   PAYMENT_REFUNDED: 'Refund processed successfully',
   VAULT_CHARGED: 'Ride charged successfully via customer account',
   CARD_SAVED: 'Card saved successfully',
+  DRIVER_CARD_PROCESSED: 'Driver card details processed successfully',
 
   // Fare Override
   FARE_OVERRIDE_SUCCESS: 'Fare overridden successfully',
