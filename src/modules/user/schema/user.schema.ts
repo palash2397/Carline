@@ -57,6 +57,13 @@ export class User {
   @Prop({
     type: String,
     default: null,
+    index: true,
+  })
+  companyId?: string;
+
+  @Prop({
+    type: String,
+    default: null,
   })
   avatar?: string;
 

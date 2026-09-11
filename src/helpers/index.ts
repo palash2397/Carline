@@ -27,3 +27,12 @@ export const deleteOldFile = (folder: string, file?: string): void => {
     console.log('Error while deleting file --------->', error);
   }
 };
+
+export const generateRandomPassword = (length: number = 8): string => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `${password}@9`;
+};

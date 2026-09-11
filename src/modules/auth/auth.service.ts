@@ -10,6 +10,7 @@ import { Msg } from 'src/helpers/responseMsg';
 
 import { User, UserDocument } from 'src/modules/user/schema/user.schema';
 import { UserRegisterDto } from './dto/user-register.dto';
+import { UserRole } from 'src/common/enums/user/role.enum';
 
 import { getOtpEmailTemplate } from 'src/modules/mail/template/otp.template';
 import { MailService } from 'src/modules/mail/mail.service';
@@ -153,8 +154,9 @@ export class AuthService {
 
   async login(dto: LoginUserDto) {
     try {
+      const normalizedEmail = (dto.email || '').toLowerCase().trim();
       const userData = await this.userModel
-        .findOne({ email: dto.email })
+        .findOne({ email: normalizedEmail })
         .select('+password');
       if (!userData) {
         return new ApiResponse(400, {}, Msg.INVALID_CREDENTIALS);
@@ -168,17 +170,28 @@ export class AuthService {
         return new ApiResponse(400, {}, Msg.USER_NOT_VERIFIED);
       }
 
+      if (dto.role) {
+        const requestedRole = dto.role.toUpperCase().replace(/\s+/g, '_');
+        const userRole = (userData.role || '').toUpperCase();
+        if (requestedRole !== userRole && userRole !== UserRole.SUPERADMIN) {
+          return new ApiResponse(
+            403,
+            {},
+            `Unauthorized: You do not have permission to access the ${dto.role} portal.`,
+          );
+        }
+      }
+
       const isPasswordValid = await bcrypt.compare(
         dto.password,
         userData?.password!,
       );
-      // console.log('isPasswordValid', isPasswordValid);
       if (!isPasswordValid) {
         return new ApiResponse(401, {}, Msg.INVALID_CREDENTIALS);
       }
 
       const token = jwt.sign(
-        { id: userData._id, roles: userData.role },
+        { id: userData._id, roles: userData.role, email: userData.email },
         process.env.JWT_SECRET!,
         {
           expiresIn: '10d',
@@ -187,8 +200,12 @@ export class AuthService {
 
       const userDataResponse = {
         _id: userData._id,
-        name: userData.firstName + ' ' + userData.lastName,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
         email: userData.email,
+        phoneNumber: userData.phoneNumber,
+        role: userData.role,
         roles: userData.role,
         token,
       };

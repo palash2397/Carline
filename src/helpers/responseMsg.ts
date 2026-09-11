@@ -196,4 +196,13 @@ export const Msg = {
   CUSTOMER_FETCHED: 'Customer fetched successfully',
   CUSTOMERS_FETCHED: 'Customers fetched successfully',
   CUSTOMER_ALREADY_EXISTS: 'Customer already exists',
+
+  // Company
+  COMPANY_CREATED: 'Company registered successfully',
+  COMPANY_FETCHED: 'Company details fetched successfully',
+  COMPANIES_FETCHED: 'Companies fetched successfully',
+  COMPANY_UPDATED: 'Company updated successfully',
+  COMPANY_STATUS_UPDATED: 'Company status updated successfully',
+  COMPANY_NOT_FOUND: 'Company not found',
+  COMPANY_ALREADY_EXISTS: 'Company with this code or legal name already exists',
 };
