@@ -30,7 +30,21 @@ export class SuperAdminService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.cleanupObsoleteIndexes();
     await this.seedSuperAdmin();
+  }
+
+  async cleanupObsoleteIndexes() {
+    try {
+      const indexes = await this.companyModel.collection.indexes();
+      const hasOldEmailIndex = indexes.some((idx) => idx.name === 'email_1');
+      if (hasOldEmailIndex) {
+        await this.companyModel.collection.dropIndex('email_1');
+        console.log('✅ Dropped obsolete index email_1 from companies collection');
+      }
+    } catch (error: any) {
+      console.log('Note: Error checking/dropping company indexes:', error?.message);
+    }
   }
 
   async seedSuperAdmin() {
