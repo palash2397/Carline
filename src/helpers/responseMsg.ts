@@ -105,7 +105,8 @@ export const Msg = {
   DRIVER_BATCH_UPDATED: 'Driver batch updated successfully',
   DRIVER_BATCHES_UPDATED: 'Driver batches updated successfully',
   DRIVER_DELETED: 'Driver deleted successfully',
-  DRIVER_EARNINGS_HISTORY_FETCHED: 'Driver earnings history fetched successfully',
+  DRIVER_EARNINGS_HISTORY_FETCHED:
+    'Driver earnings history fetched successfully',
   DRIVER_SETTLEMENT_PROCESSED: 'Driver settlement processed successfully',
 
   // Route
@@ -180,6 +181,16 @@ export const Msg = {
   VAULT_CHARGED: 'Ride charged successfully via customer account',
   CARD_SAVED: 'Card saved successfully',
   DRIVER_CARD_PROCESSED: 'Driver card details processed successfully',
+  NO_SAVED_CARD:
+    'No saved card or customer token found for this customer. Please save a card first.',
+  CUSTOMER_NUMBER_IS_CARD_NUMBER:
+    'Customer number is same as card number. Please use a different number.',
+  PAYMENT_LOGS_FETCHED: 'Payment logs fetched successfully',
+  PAYMENT_LOGS_NOT_FOUND: 'No payment logs found',
+  NO_CARD_ON_FILE: 'No card on file for this customer',
+  CUSTOMER_NOT_FOUND_FOR_CUSTOMER_NUMBER:
+    'No customer found for this customer number.',
+  CUSTOMER_CARD_DETAILS_FETCHED: 'Customer card details fetched successfully',
 
   // Fare Override
   FARE_OVERRIDE_SUCCESS: 'Fare overridden successfully',

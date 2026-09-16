@@ -310,15 +310,9 @@ export class PaymentService {
       }
 
       if (!targetTokenOrId) {
-        return new ApiResponse(
-          400,
-          {},
-          'No saved card or customer token found for this customer. Please save a card first.',
-        );
+        return new ApiResponse(400, {}, Msg.NO_SAVED_CARD);
       }
 
-      // USAePay tokens are passed in creditcard: { number: token }
-      // Customer profile IDs are passed in customer_id
       if (targetTokenOrId.includes('-') || targetTokenOrId.length > 15) {
         payload.creditcard = { number: targetTokenOrId };
       } else {
@@ -423,7 +417,6 @@ export class PaymentService {
       try {
         response = await this.executeUSAePayRequest('tokens', tokenPayload);
       } catch (err) {
-        // Fallback to cc:save command on transactions
         const fallbackPayload: any = {
           command: 'cc:save',
           creditcard: {
@@ -551,13 +544,13 @@ export class PaymentService {
         .exec();
 
       if (!logs || logs.length === 0) {
-        return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
+        return new ApiResponse(404, {}, Msg.PAYMENT_LOGS_NOT_FOUND);
       }
 
       return new ApiResponse(
         200,
         { logs, total, page, limit },
-        Msg.DATA_FETCHED,
+        Msg.PAYMENT_LOGS_FETCHED,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
@@ -594,7 +587,7 @@ export class PaymentService {
             cardLast4: null,
             cardBrand: null,
           },
-          'No card on file for this customer',
+          Msg.NO_CARD_ON_FILE,
         );
       }
 
@@ -610,7 +603,7 @@ export class PaymentService {
           cardLast4: last4,
           cardBrand: customer.cardBrand || 'Card',
         },
-        'Customer card details fetched successfully',
+        Msg.CUSTOMER_CARD_DETAILS_FETCHED,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
