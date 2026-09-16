@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { PaymentLog, PaymentLogDocument } from './schema/payment-log.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
 import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
+import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 import { ProcessCardPaymentDto } from './dto/process-card-payment.dto';
 import { ChargeRidePaymentDto } from './dto/charge-ride-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
@@ -14,6 +15,7 @@ import { ApiResponse } from '../../helpers/ApiResponse';
 import { Msg } from 'src/helpers/responseMsg';
 import { PaymentStatus } from 'src/common/enums/payment/payment-status';
 import { PaymentType } from 'src/common/enums/payment/payment-type';
+import { RideStatus } from 'src/common/enums/ride/ride-enum';
 
 @Injectable()
 export class PaymentService {
@@ -26,6 +28,8 @@ export class PaymentService {
     private rideModel: Model<RideDocument>,
     @InjectModel(Customer.name)
     private customerModel: Model<CustomerDocument>,
+    @InjectModel(Driver.name)
+    private driverModel: Model<DriverDocument>,
   ) {}
 
   private normalizeExpiration(exp?: string): string {
@@ -37,6 +41,43 @@ export class PaymentService {
       return clean.slice(0, 2) + clean.slice(4, 6);
     }
     return clean;
+  }
+
+  private async findLinkedDriver(ride: RideDocument): Promise<DriverDocument | null> {
+    if (ride._id) {
+      const driverByActive = await this.driverModel.findOne({
+        activeRideId: ride._id.toString(),
+      });
+      if (driverByActive) return driverByActive;
+    }
+
+    if (ride.driverId) {
+      const byId = await this.driverModel
+        .findById(ride.driverId)
+        .catch(() => null);
+      if (byId) return byId;
+
+      const numId = Number(ride.driverId);
+      if (!isNaN(numId) && numId > 0) {
+        const byNumId = await this.driverModel.findOne({ driverId: numId });
+        if (byNumId) return byNumId;
+      }
+    }
+
+    if (ride.driverNumber) {
+      const cleanDriverNumber = (ride.driverNumber || '').replace(/\D/g, '');
+      const driverByPhone = await this.driverModel.findOne({
+        $or: [
+          { mobileNumber: ride.driverNumber },
+          ...(cleanDriverNumber && cleanDriverNumber.length >= 7
+            ? [{ mobileNumber: { $regex: cleanDriverNumber, $options: 'i' } }]
+            : []),
+        ],
+      });
+      if (driverByPhone) return driverByPhone;
+    }
+
+    return null;
   }
 
   private async executeUSAePayRequest(endpoint: string, payload: any) {
@@ -274,6 +315,48 @@ export class PaymentService {
         return new ApiResponse(404, {}, Msg.RIDE_NOT_FOUND);
       }
 
+      // Idempotency check: If ride has already been successfully paid, do not charge again
+      if (
+        ride.paymentStatus === PaymentStatus.COMPLETED ||
+        ride.paymentStatus === 'COMPLETED' ||
+        ride.rideStatus === RideStatus.COMPLETED ||
+        ride.rideStatus === 'COMPLETED'
+      ) {
+        // Ensure rideStatus is marked COMPLETED if it wasn't already
+        if (
+          ride.rideStatus !== RideStatus.COMPLETED &&
+          ride.rideStatus !== 'COMPLETED'
+        ) {
+          ride.rideStatus = RideStatus.COMPLETED;
+          ride.rideCompleteDateTime =
+            ride.rideCompleteDateTime || new Date().toISOString();
+          await ride.save();
+        }
+
+        // Ensure driver is freed up if still linked
+        const driver = await this.findLinkedDriver(ride);
+        if (driver && driver.activeRideId === ride._id.toString()) {
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
+          await driver.save();
+        }
+
+        return new ApiResponse(
+          200,
+          {
+            tripNumber: ride.tripNumber,
+            transactionId: ride.paymentTransactionId || '',
+            authCode: ride.paymentAuthCode || '',
+            refnum: ride.paymentTransactionId || '',
+            amount: ride.rideAmount || dto.amount,
+            status: 'Approved',
+            alreadyPaid: true,
+          },
+          Msg.VAULT_CHARGED,
+        );
+      }
+
       const amountToCharge = dto.amount || ride.rideAmount;
       if (!amountToCharge || amountToCharge <= 0) {
         return new ApiResponse(400, {}, Msg.BAD_REQUEST);
@@ -337,14 +420,26 @@ export class PaymentService {
           resData.result_code === 'A' ||
           resData.result === 'Approved');
 
+      const transactionId = resData?.refnum || resData?.key || resData?.id || '';
+      const authCode = resData?.authcode || '';
+
       ride.paymentType = PaymentType.CUSTOMER_ACCOUNT;
       ride.paymentStatus = isApproved
         ? PaymentStatus.COMPLETED
         : PaymentStatus.FAILED;
-      ride.paymentTransactionId = resData.refnum || '';
-      ride.paymentAuthCode = resData.authcode || '';
+      ride.paymentTransactionId = transactionId;
+      ride.paymentAuthCode = authCode;
       ride.paymentGatewayResponse = resData;
       ride.ridePaymentDateTime = new Date().toISOString();
+
+      if (isApproved) {
+        ride.rideStatus = RideStatus.COMPLETED;
+        ride.rideCompleteDateTime =
+          ride.rideCompleteDateTime || new Date().toISOString();
+        if (amountToCharge) {
+          ride.rideAmount = amountToCharge;
+        }
+      }
       await ride.save();
 
       const log = new this.paymentLogModel({
@@ -355,14 +450,30 @@ export class PaymentService {
         currency: 'USD',
         paymentType: PaymentType.CUSTOMER_ACCOUNT,
         status: isApproved ? PaymentStatus.APPROVED : PaymentStatus.DECLINED,
-        transactionId: resData.refnum || '',
-        authCode: resData.authcode || '',
+        transactionId: transactionId,
+        authCode: authCode,
         gatewayResponse: resData,
         errorMessage: isApproved
           ? ''
           : resData.error || 'Account Charge Declined',
       });
       await log.save();
+
+      if (isApproved) {
+        // Find and free up the driver, update earnings
+        const driver = await this.findLinkedDriver(ride);
+        if (driver) {
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
+          driver.lastTripTaken = new Date();
+          driver.earningsWithoutCash =
+            (driver.earningsWithoutCash || 0) + (amountToCharge || 0);
+          driver.totalEarnings =
+            (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+          await driver.save();
+        }
+      }
 
       if (!isApproved) {
         return new ApiResponse(400, resData, Msg.PAYMENT_DECLINED);
@@ -372,9 +483,11 @@ export class PaymentService {
         200,
         {
           tripNumber: dto.tripNumber,
-          transactionId: resData.refnum,
-          authCode: resData.authcode,
+          transactionId: transactionId,
+          authCode: authCode,
+          refnum: transactionId,
           amount: amountToCharge,
+          status: 'Approved',
         },
         Msg.VAULT_CHARGED,
       );

@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { PaymentLog, PaymentLogSchema } from './schema/payment-log.schema';
 import { Ride, RideSchema } from '../ride/schema/ride.schema';
 import { Customer, CustomerSchema } from '../customer/schema/customer.schema';
+import { Driver, DriverSchema } from '../driver/schema/driver.schema';
 import { PaymentService } from './payment.service';
 import { PaymentController } from './payment.controller';
 
@@ -12,6 +13,7 @@ import { PaymentController } from './payment.controller';
       { name: PaymentLog.name, schema: PaymentLogSchema },
       { name: Ride.name, schema: RideSchema },
       { name: Customer.name, schema: CustomerSchema },
+      { name: Driver.name, schema: DriverSchema },
     ]),
   ],
   controllers: [PaymentController],

@@ -897,6 +897,7 @@ export class IvrService {
 
       let workflowStage = 'IDLE';
       let activeTripData: any = null;
+      let completedTripData: any = null;
 
       let ride = driver.activeRideId
         ? await this.rideModel.findById(driver.activeRideId)
@@ -914,6 +915,31 @@ export class IvrService {
           'PAYMENT_PENDING',
         ].includes(ride.rideStatus as any)
       ) {
+        if (
+          ride.rideStatus === RideStatus.COMPLETED ||
+          ride.rideStatus === 'COMPLETED' ||
+          ride.paymentStatus === PaymentStatus.COMPLETED ||
+          ride.paymentStatus === 'COMPLETED'
+        ) {
+          completedTripData = {
+            tripId: ride._id,
+            tripNumber: ride.tripNumber,
+            customerName: ride.customerName || '',
+            customerNumber: ride.customerNumber || '',
+            queueName: ride.queueName || '',
+            recordingUrl: ride.recordingUrl || '',
+            rideStatus: ride.rideStatus || 'COMPLETED',
+            status: ride.rideStatus || 'COMPLETED',
+            paymentStatus: ride.paymentStatus || 'COMPLETED',
+            paymentType: ride.paymentType || '',
+            transactionId: ride.paymentTransactionId || '',
+            authCode: ride.paymentAuthCode || '',
+            rideAmount: ride.rideAmount || 0,
+            fareAmount: ride.rideAmount || 0,
+            rideStartDateTime: ride.rideStartDateTime || '',
+            rideCompleteDateTime: ride.rideCompleteDateTime || '',
+          };
+        }
         ride = null;
         if (driver.activeRideId) {
           driver.activeRideId = '';
@@ -949,6 +975,42 @@ export class IvrService {
           driver.activeRideId = ride._id.toString();
           driver.isAvailable = false;
           await driver.save();
+        }
+      }
+
+      // If no active ride found, check if a ride was recently completed (within last 2 minutes)
+      if (!ride && !completedTripData) {
+        const recentCompletedRide = await this.rideModel
+          .findOne({
+            $or: [
+              { driverId: driver._id.toString() },
+              { driverId: String(driver.driverId) },
+              { driverNumber: driver.mobileNumber },
+            ],
+            rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
+            updatedAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) },
+          })
+          .sort({ updatedAt: -1 });
+
+        if (recentCompletedRide) {
+          completedTripData = {
+            tripId: recentCompletedRide._id,
+            tripNumber: recentCompletedRide.tripNumber,
+            customerName: recentCompletedRide.customerName || '',
+            customerNumber: recentCompletedRide.customerNumber || '',
+            queueName: recentCompletedRide.queueName || '',
+            recordingUrl: recentCompletedRide.recordingUrl || '',
+            rideStatus: recentCompletedRide.rideStatus || 'COMPLETED',
+            status: recentCompletedRide.rideStatus || 'COMPLETED',
+            paymentStatus: recentCompletedRide.paymentStatus || 'COMPLETED',
+            paymentType: recentCompletedRide.paymentType || '',
+            transactionId: recentCompletedRide.paymentTransactionId || '',
+            authCode: recentCompletedRide.paymentAuthCode || '',
+            rideAmount: recentCompletedRide.rideAmount || 0,
+            fareAmount: recentCompletedRide.rideAmount || 0,
+            rideStartDateTime: recentCompletedRide.rideStartDateTime || '',
+            rideCompleteDateTime: recentCompletedRide.rideCompleteDateTime || '',
+          };
         }
       }
 
@@ -1050,6 +1112,9 @@ export class IvrService {
             fareOverrideApplied: !!ride.fareOverrideApplied,
           };
         }
+      } else if (completedTripData) {
+        workflowStage = 'COMPLETED';
+        activeTripData = completedTripData;
       }
 
       const hasActiveTrip = !!ride && !!activeTripData;
@@ -1066,7 +1131,7 @@ export class IvrService {
           available: driver.isAvailable,
           workflowStage,
           activeTrip: hasActiveTrip,
-          trip: hasActiveTrip ? activeTripData : null,
+          trip: hasActiveTrip ? activeTripData : (completedTripData || null),
           activeTripData: activeTripData || null,
         },
         'Driver status fetched',
