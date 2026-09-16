@@ -43,7 +43,9 @@ export class PaymentService {
     return clean;
   }
 
-  private async findLinkedDriver(ride: RideDocument): Promise<DriverDocument | null> {
+  private async findLinkedDriver(
+    ride: RideDocument,
+  ): Promise<DriverDocument | null> {
     if (ride._id) {
       const driverByActive = await this.driverModel.findOne({
         activeRideId: ride._id.toString(),
@@ -175,7 +177,10 @@ export class PaymentService {
       }
     }
 
-    throw lastError || new Error('USAePay request failed: No response from gateway.');
+    throw (
+      lastError ||
+      new Error('USAePay request failed: No response from gateway.')
+    );
   }
 
   private getBaseUrl(): string {
@@ -420,7 +425,8 @@ export class PaymentService {
           resData.result_code === 'A' ||
           resData.result === 'Approved');
 
-      const transactionId = resData?.refnum || resData?.key || resData?.id || '';
+      const transactionId =
+        resData?.refnum || resData?.key || resData?.id || '';
       const authCode = resData?.authcode || '';
 
       ride.paymentType = PaymentType.CUSTOMER_ACCOUNT;

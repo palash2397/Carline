@@ -120,7 +120,10 @@ export class IvrService {
             paymentResult = chargeResponse?.data;
           }
         } catch (payErr) {
-          console.log('Error while charging card via payment service in IVR:', payErr);
+          console.log(
+            'Error while charging card via payment service in IVR:',
+            payErr,
+          );
         }
       } else {
         if (ride.paymentStatus !== PaymentStatus.COMPLETED) {
@@ -395,13 +398,16 @@ export class IvrService {
             activeRide.paymentType = 'CASH';
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
-            
+
             driver.activeRideId = '';
             driver.isAvailable = true;
             driver.ongoingRides = 'NO';
             driver.lastTripTaken = new Date();
-            driver.earningsWithCash = (driver.earningsWithCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+            driver.earningsWithCash =
+              (driver.earningsWithCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings =
+              (driver.earningsWithCash || 0) +
+              (driver.earningsWithoutCash || 0);
 
             await activeRide.save();
             await driver.save();
@@ -414,13 +420,16 @@ export class IvrService {
             activeRide.paymentType = 'CREDIT_CARD';
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
-            
+
             driver.activeRideId = '';
             driver.isAvailable = true;
             driver.ongoingRides = 'NO';
             driver.lastTripTaken = new Date();
-            driver.earningsWithoutCash = (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+            driver.earningsWithoutCash =
+              (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings =
+              (driver.earningsWithCash || 0) +
+              (driver.earningsWithoutCash || 0);
 
             await activeRide.save();
             await driver.save();
@@ -431,7 +440,7 @@ export class IvrService {
             );
           } else if (dto.dtmfInput === '3') {
             activeRide.paymentType = 'CUSTOMER_ACCOUNT';
-            
+
             // Trigger USAePay charge via customer account
             await this.paymentService.chargeRideVault({
               tripNumber: activeRide.tripNumber,
@@ -440,13 +449,16 @@ export class IvrService {
 
             activeRide.paymentStatus = 'COMPLETED';
             activeRide.rideStatus = RideStatus.COMPLETED;
-            
+
             driver.activeRideId = '';
             driver.isAvailable = true;
             driver.ongoingRides = 'NO';
             driver.lastTripTaken = new Date();
-            driver.earningsWithoutCash = (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings = (driver.earningsWithCash || 0) + (driver.earningsWithoutCash || 0);
+            driver.earningsWithoutCash =
+              (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
+            driver.totalEarnings =
+              (driver.earningsWithCash || 0) +
+              (driver.earningsWithoutCash || 0);
 
             await activeRide.save();
             await driver.save();
@@ -588,11 +600,17 @@ export class IvrService {
 
     // 7. Extract override amount in integer cents
     let amountCents: number | null = null;
-    if (dto.overrideAmountCents !== undefined && dto.overrideAmountCents !== null) {
+    if (
+      dto.overrideAmountCents !== undefined &&
+      dto.overrideAmountCents !== null
+    ) {
       amountCents = Number(dto.overrideAmountCents);
     } else if (dto.amountCents !== undefined && dto.amountCents !== null) {
       amountCents = Number(dto.amountCents);
-    } else if (dto.overrideAmount !== undefined && dto.overrideAmount !== null) {
+    } else if (
+      dto.overrideAmount !== undefined &&
+      dto.overrideAmount !== null
+    ) {
       amountCents = Math.round(Number(dto.overrideAmount) * 100);
     } else if (dto.amount !== undefined && dto.amount !== null) {
       amountCents = Math.round(Number(dto.amount) * 100);
@@ -903,24 +921,39 @@ export class IvrService {
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
 
-      // If linked ride is not in an active workflow status, reset it
-      if (
+      // If linked ride is already completed or paid, finalize and reset active ride
+      const isRidePaidOrCompleted =
         ride &&
-        ![
-          RideStatus.ACCEPTED,
-          RideStatus.STARTED,
-          RideStatus.PAYMENT_PENDING,
-          'ACCEPTED',
-          'STARTED',
-          'PAYMENT_PENDING',
-        ].includes(ride.rideStatus as any)
-      ) {
+        (ride.paymentStatus === PaymentStatus.COMPLETED ||
+          ride.paymentStatus === 'COMPLETED' ||
+          ride.rideStatus === RideStatus.COMPLETED ||
+          ride.rideStatus === 'COMPLETED' ||
+          ![
+            RideStatus.ACCEPTED,
+            RideStatus.STARTED,
+            RideStatus.PAYMENT_PENDING,
+            'ACCEPTED',
+            'STARTED',
+            'PAYMENT_PENDING',
+          ].includes(ride.rideStatus as any));
+
+      if (isRidePaidOrCompleted && ride) {
         if (
           ride.rideStatus === RideStatus.COMPLETED ||
           ride.rideStatus === 'COMPLETED' ||
           ride.paymentStatus === PaymentStatus.COMPLETED ||
           ride.paymentStatus === 'COMPLETED'
         ) {
+          if (
+            ride.rideStatus !== RideStatus.COMPLETED &&
+            ride.rideStatus !== 'COMPLETED'
+          ) {
+            ride.rideStatus = RideStatus.COMPLETED;
+            ride.rideCompleteDateTime =
+              ride.rideCompleteDateTime || new Date().toISOString();
+            await ride.save();
+          }
+
           completedTripData = {
             tripId: ride._id,
             tripNumber: ride.tripNumber,
@@ -967,6 +1000,7 @@ export class IvrService {
                 'PAYMENT_PENDING',
               ],
             },
+            paymentStatus: { $ne: 'COMPLETED' },
           })
           .sort({ createdAt: -1 });
 
@@ -978,7 +1012,7 @@ export class IvrService {
         }
       }
 
-      // If no active ride found, check if a ride was recently completed (within last 2 minutes)
+      // If no active ride found, check if a ride was recently completed or paid
       if (!ride && !completedTripData) {
         const recentCompletedRide = await this.rideModel
           .findOne({
@@ -987,8 +1021,14 @@ export class IvrService {
               { driverId: String(driver.driverId) },
               { driverNumber: driver.mobileNumber },
             ],
-            rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
-            updatedAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) },
+            $and: [
+              {
+                $or: [
+                  { rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] } },
+                  { paymentStatus: { $in: [PaymentStatus.COMPLETED, 'COMPLETED'] } },
+                ],
+              },
+            ],
           })
           .sort({ updatedAt: -1 });
 
@@ -1009,7 +1049,8 @@ export class IvrService {
             rideAmount: recentCompletedRide.rideAmount || 0,
             fareAmount: recentCompletedRide.rideAmount || 0,
             rideStartDateTime: recentCompletedRide.rideStartDateTime || '',
-            rideCompleteDateTime: recentCompletedRide.rideCompleteDateTime || '',
+            rideCompleteDateTime:
+              recentCompletedRide.rideCompleteDateTime || '',
           };
         }
       }
@@ -1056,7 +1097,8 @@ export class IvrService {
           let baseTimeMinutes = 0;
           let perMinuteRate = 0;
           let extraMinutes = 0;
-          let calculatedFare = ride.originalCalculatedFare || ride.rideAmount || 0;
+          let calculatedFare =
+            ride.originalCalculatedFare || ride.rideAmount || 0;
 
           if (ride.selectedZone) {
             try {
@@ -1080,7 +1122,10 @@ export class IvrService {
                 await ride.save();
               }
             } catch (err) {
-              console.log('Failed calculating zone fare for status', err.message);
+              console.log(
+                'Failed calculating zone fare for status',
+                err.message,
+              );
             }
           }
 
@@ -1131,7 +1176,7 @@ export class IvrService {
           available: driver.isAvailable,
           workflowStage,
           activeTrip: hasActiveTrip,
-          trip: hasActiveTrip ? activeTripData : (completedTripData || null),
+          trip: hasActiveTrip ? activeTripData : completedTripData || null,
           activeTripData: activeTripData || null,
         },
         'Driver status fetched',
