@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
+import * as crypto from 'crypto';
 import { PaymentLog, PaymentLogDocument } from './schema/payment-log.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
 import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
@@ -27,15 +28,36 @@ export class PaymentService {
     private customerModel: Model<CustomerDocument>,
   ) {}
 
+  private normalizeExpiration(exp?: string): string {
+    if (!exp) return '';
+    const clean = exp.replace(/\D/g, '');
+    if (clean.length === 4) return clean; // MMYY
+    if (clean.length === 6) {
+      // MMYYYY -> MMYY
+      return clean.slice(0, 2) + clean.slice(4, 6);
+    }
+    return clean;
+  }
+
   private async executeUSAePayRequest(endpoint: string, payload: any) {
     const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
     const apiPin = (process.env.USAEPAY_API_PIN || '').trim();
-    const baseUrl = (process.env.USAEPAY_BASE_URL || 'https://sandbox.usaepay.com/api/v2').replace(/\/$/, '');
+    const baseUrl = (
+      process.env.USAEPAY_BASE_URL || 'https://sandbox.usaepay.com/api/v2'
+    ).replace(/\/$/, '');
 
     const targetUrls = [
       `${baseUrl}/${endpoint.replace(/^\//, '')}`,
-      `https://secure.usaepay.com/api/v2/${endpoint.replace(/^\//, '')}`,
     ];
+    if (baseUrl.includes('sandbox')) {
+      targetUrls.push(
+        `https://sandbox.usaepay.com/api/v2/${endpoint.replace(/^\//, '')}`,
+      );
+    } else {
+      targetUrls.push(
+        `https://usaepay.com/api/v2/${endpoint.replace(/^\//, '')}`,
+      );
+    }
 
     // Remove duplicate URLs
     const urls = Array.from(new Set(targetUrls));
@@ -43,30 +65,39 @@ export class PaymentService {
     // Auth strategies
     const authHeaders: { name: string; header: string }[] = [];
 
-    // 1. Basic Auth with PIN
-    authHeaders.push({
-      name: 'Basic with PIN',
-      header: `Basic ${Buffer.from(`${apiKey}:${apiPin}`).toString('base64')}`,
-    });
+    // 1. Official USAePay s2 SHA256 API Hash (Standard when PIN is present)
+    if (apiKey && apiPin) {
+      try {
+        const seed = crypto.randomBytes(16).toString('hex');
+        const prehash = apiKey + seed + apiPin;
+        const apihash =
+          's2/' +
+          seed +
+          '/' +
+          crypto.createHash('sha256').update(prehash).digest('hex');
+        const authKey = Buffer.from(`${apiKey}:${apihash}`).toString('base64');
+        authHeaders.push({
+          name: 'Official USAePay s2 SHA256 Hash',
+          header: `Basic ${authKey}`,
+        });
+      } catch (e) {}
+    }
 
-    // 2. Basic Auth without PIN (for keys where PIN is not enabled)
-    authHeaders.push({
-      name: 'Basic without PIN',
-      header: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-    });
-
-    // 3. USAePay s2 SHA256 Token Security Digest
-    try {
-      const crypto = require('crypto');
-      const seed = Date.now().toString() + Math.random().toString(36).substring(2, 8);
-      const prehash = `s2/${apiKey}/${seed}/${apiPin}`;
-      const hash = crypto.createHash('sha256').update(prehash).digest('hex');
-      const token = Buffer.from(`s2/${apiKey}/${seed}/${hash}`).toString('base64');
+    // 2. Direct Basic Auth with PIN
+    if (apiKey && apiPin) {
       authHeaders.push({
-        name: 'USASHA256 s2 digest',
-        header: `USASHA256 ${token}`,
+        name: 'Basic with PIN',
+        header: `Basic ${Buffer.from(`${apiKey}:${apiPin}`).toString('base64')}`,
       });
-    } catch (e) {}
+    }
+
+    // 3. Direct Basic Auth without PIN
+    if (apiKey) {
+      authHeaders.push({
+        name: 'Basic without PIN',
+        header: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
+      });
+    }
 
     let lastError: any = null;
 
@@ -79,14 +110,19 @@ export class PaymentService {
               Authorization: authObj.header,
               'Content-Type': 'application/json',
             },
+            timeout: 15000,
           });
 
           this.logger.log(`USAePay Success using [${authObj.name}] at ${url}`);
           return response;
         } catch (err: any) {
           lastError = err;
-          const errData = JSON.stringify(err.response?.data || err.message || '');
-          this.logger.warn(`USAePay [${authObj.name}] at ${url} failed: ${errData}`);
+          const errData = JSON.stringify(
+            err.response?.data || err.message || '',
+          );
+          this.logger.warn(
+            `USAePay [${authObj.name}] at ${url} failed: ${errData}`,
+          );
         }
       }
     }
@@ -103,24 +139,29 @@ export class PaymentService {
   async processCardSale(dto: ProcessCardPaymentDto) {
     try {
       const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
+      const amountStr = Number(dto.amount).toFixed(2);
+      const cleanCard = (dto.cardNumber || '').replace(/[\s-]/g, '');
+      const cleanExp = this.normalizeExpiration(dto.expiration);
 
-      const payload = {
-        key: apiKey,
-        source_key: apiKey,
-        command: 'sale',
-        amount: dto.amount,
+      const payload: any = {
+        command: 'cc:sale',
+        amount: amountStr,
         invoice: dto.tripNumber || `INV-${Date.now()}`,
         description: `Carline Ride Payment - ${dto.tripNumber || 'Direct Card'}`,
         creditcard: {
-          number: dto.cardNumber,
-          expiration: dto.expiration,
+          number: cleanCard,
+          expiration: cleanExp,
           cvv: dto.cvv,
+          cvc: dto.cvv,
           cardholder: dto.cardholder || 'Valued Customer',
         },
       };
 
-      console.log('payload', payload);
-      this.logger.log(`Initiating USAePay sale for amount: $${dto.amount}`);
+      if (apiKey) {
+        payload.key = apiKey;
+      }
+
+      this.logger.log(`Initiating USAePay sale for amount: $${amountStr}`);
 
       const response = await this.executeUSAePayRequest('transactions', payload);
 
@@ -229,14 +270,18 @@ export class PaymentService {
       }
 
       const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
+      const amountStr = Number(amountToCharge).toFixed(2);
 
       const payload: any = {
-        key: apiKey,
-        command: 'sale',
-        amount: amountToCharge,
+        command: 'cc:sale',
+        amount: amountStr,
         invoice: dto.tripNumber,
         description: `Ride Charge for ${dto.tripNumber}`,
       };
+
+      if (apiKey) {
+        payload.key = apiKey;
+      }
 
       if (dto.customerId) {
         payload.customer_id = dto.customerId;
@@ -324,17 +369,19 @@ export class PaymentService {
       }
 
       const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
+      const cleanCard = (dto.cardNumber || '').replace(/[\s-]/g, '');
+      const cleanExp = this.normalizeExpiration(dto.expiration);
 
-      const payload = {
-        key: apiKey,
+      const payload: any = {
         name: dto.cardholder || customer.fullName || 'Valued Customer',
         phone: dto.customerNumber,
         payment_methods: [
           {
             card: {
-              number: dto.cardNumber,
-              expiration: dto.expiration,
+              number: cleanCard,
+              expiration: cleanExp,
               cvv: dto.cvv,
+              cvc: dto.cvv,
               cardholder:
                 dto.cardholder || customer.fullName || 'Valued Customer',
             },
@@ -342,12 +389,16 @@ export class PaymentService {
         ],
       };
 
+      if (apiKey) {
+        payload.key = apiKey;
+      }
+
       const response = await this.executeUSAePayRequest('customers', payload);
 
       const resData = response.data;
       const customerId =
         resData.custnum || resData.id || resData.key || `USAEPAY-${Date.now()}`;
-      const last4 = dto.cardNumber ? dto.cardNumber.slice(-4) : '****';
+      const last4 = cleanCard ? cleanCard.slice(-4) : '****';
 
       customer.usaepayCustomerId = customerId;
       customer.cardLast4 = last4;
@@ -377,17 +428,27 @@ export class PaymentService {
   async refundTransaction(dto: RefundPaymentDto) {
     try {
       const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
-      const payload = {
-        key: apiKey,
-        command: 'refund',
-        amount: dto.amount,
+      const amountStr = Number(dto.amount).toFixed(2);
+      const payload: any = {
+        command: 'cc:refund',
+        amount: amountStr,
+        refnum: dto.transactionId,
         reason: dto.reason || 'Customer refund',
       };
 
-      const response = await this.executeUSAePayRequest(
-        `transactions/${dto.transactionId}/refund`,
-        payload,
-      );
+      if (apiKey) {
+        payload.key = apiKey;
+      }
+
+      let response: any;
+      try {
+        response = await this.executeUSAePayRequest(
+          `transactions/${dto.transactionId}/refund`,
+          payload,
+        );
+      } catch (err) {
+        response = await this.executeUSAePayRequest('transactions', payload);
+      }
 
       const resData = response.data;
 
