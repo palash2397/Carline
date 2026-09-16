@@ -48,6 +48,7 @@ export const Msg = {
   DATA_REQUIRED: `Data is required`,
   DATA_ALREADY_EXISTS: `Data  already exists`,
   DATA_IS_CLOSED: `Data is closed`,
+  DATA_NOT_UPDATED: `Data not updated`,
 
   // Id
   ID_REQUIRED: `Id is required`,

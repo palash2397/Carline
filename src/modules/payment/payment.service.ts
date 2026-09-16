@@ -97,6 +97,12 @@ export class PaymentService {
       });
     }
 
+    if (!apiKey || authHeaders.length === 0) {
+      throw new Error(
+        'USAePay configuration missing: USAEPAY_API_KEY is not defined in environment variables.',
+      );
+    }
+
     let lastError: any = null;
 
     for (const url of urls) {
@@ -128,7 +134,7 @@ export class PaymentService {
       }
     }
 
-    throw lastError;
+    throw lastError || new Error('USAePay request failed: No response from gateway.');
   }
 
   private getBaseUrl(): string {
@@ -238,9 +244,9 @@ export class PaymentService {
       );
     } catch (error: any) {
       const errorMsg =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        error.message ||
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
         Msg.PAYMENT_FAILED;
 
       this.logger.error(`USAePay Transaction Error: ${errorMsg}`);
@@ -374,9 +380,9 @@ export class PaymentService {
       );
     } catch (error: any) {
       const errorMsg =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        error.message ||
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
         Msg.PAYMENT_FAILED;
 
       return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
@@ -471,9 +477,9 @@ export class PaymentService {
       );
     } catch (error: any) {
       const errorMsg =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        error.message ||
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
         'Failed to save card to USAePay vault';
 
       return new ApiResponse(500, { error: errorMsg }, Msg.SERVER_ERROR);
@@ -520,9 +526,9 @@ export class PaymentService {
       return new ApiResponse(200, resData, Msg.PAYMENT_REFUNDED);
     } catch (error: any) {
       const errorMsg =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        error.message ||
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
         Msg.PAYMENT_FAILED;
 
       return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
