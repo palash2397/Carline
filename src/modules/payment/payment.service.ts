@@ -68,7 +68,7 @@ export class PaymentService {
     // 1. Official USAePay s2 SHA256 API Hash (Standard when PIN is present)
     if (apiKey && apiPin) {
       try {
-        const seed = crypto.randomBytes(16).toString('hex');
+        const seed = crypto.randomBytes(8).toString('hex'); // 16 alphanumeric characters
         const prehash = apiKey + seed + apiPin;
         const apihash =
           's2/' +
@@ -117,11 +117,12 @@ export class PaymentService {
           return response;
         } catch (err: any) {
           lastError = err;
+          const status = err.response?.status || 'ERR';
           const errData = JSON.stringify(
             err.response?.data || err.message || '',
           );
           this.logger.warn(
-            `USAePay [${authObj.name}] at ${url} failed: ${errData}`,
+            `USAePay [${authObj.name}] at ${url} failed (HTTP ${status}): ${errData}`,
           );
         }
       }
@@ -372,37 +373,65 @@ export class PaymentService {
       const cleanCard = (dto.cardNumber || '').replace(/[\s-]/g, '');
       const cleanExp = this.normalizeExpiration(dto.expiration);
 
+      // Tokenize the card in USAePay vault using cc:save command
       const payload: any = {
-        name: dto.cardholder || customer.fullName || 'Valued Customer',
-        phone: dto.customerNumber,
-        payment_methods: [
-          {
-            card: {
-              number: cleanCard,
-              expiration: cleanExp,
-              cvv: dto.cvv,
-              cvc: dto.cvv,
-              cardholder:
-                dto.cardholder || customer.fullName || 'Valued Customer',
-            },
-          },
-        ],
+        command: 'cc:save',
+        creditcard: {
+          number: cleanCard,
+          expiration: cleanExp,
+          cvv: dto.cvv,
+          cvc: dto.cvv,
+          cardholder:
+            dto.cardholder || customer.fullName || 'Valued Customer',
+        },
       };
 
       if (apiKey) {
         payload.key = apiKey;
       }
 
-      const response = await this.executeUSAePayRequest('customers', payload);
+      this.logger.log(
+        `Tokenizing card for customer: ${dto.customerNumber} with cc:save`,
+      );
+
+      let response: any;
+      try {
+        response = await this.executeUSAePayRequest('transactions', payload);
+      } catch (err) {
+        // Fallback to customers endpoint
+        const custPayload: any = {
+          name: dto.cardholder || customer.fullName || 'Valued Customer',
+          phone: dto.customerNumber,
+          payment_methods: [
+            {
+              card: {
+                number: cleanCard,
+                expiration: cleanExp,
+                cvv: dto.cvv,
+                cardholder:
+                  dto.cardholder || customer.fullName || 'Valued Customer',
+              },
+            },
+          ],
+        };
+        response = await this.executeUSAePayRequest('customers', custPayload);
+      }
 
       const resData = response.data;
       const customerId =
-        resData.custnum || resData.id || resData.key || `USAEPAY-${Date.now()}`;
-      const last4 = cleanCard ? cleanCard.slice(-4) : '****';
+        resData.savedcard?.token ||
+        resData.refnum ||
+        resData.custnum ||
+        resData.key ||
+        resData.id;
+      const last4 =
+        resData.savedcard?.last4 ||
+        (cleanCard ? cleanCard.slice(-4) : '****');
+      const cardType = resData.savedcard?.type || 'Credit Card';
 
       customer.usaepayCustomerId = customerId;
       customer.cardLast4 = last4;
-      customer.cardBrand = 'Credit Card';
+      customer.cardBrand = cardType;
       await customer.save();
 
       return new ApiResponse(
@@ -411,6 +440,7 @@ export class PaymentService {
           customerNumber: dto.customerNumber,
           usaepayCustomerId: customerId,
           cardLast4: last4,
+          cardBrand: cardType,
         },
         Msg.CARD_SAVED,
       );
