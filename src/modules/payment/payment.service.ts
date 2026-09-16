@@ -46,9 +46,7 @@ export class PaymentService {
       process.env.USAEPAY_BASE_URL || 'https://sandbox.usaepay.com/api/v2'
     ).replace(/\/$/, '');
 
-    const targetUrls = [
-      `${baseUrl}/${endpoint.replace(/^\//, '')}`,
-    ];
+    const targetUrls = [`${baseUrl}/${endpoint.replace(/^\//, '')}`];
     if (baseUrl.includes('sandbox')) {
       targetUrls.push(
         `https://sandbox.usaepay.com/api/v2/${endpoint.replace(/^\//, '')}`,
@@ -104,7 +102,9 @@ export class PaymentService {
     for (const url of urls) {
       for (const authObj of authHeaders) {
         try {
-          this.logger.log(`Attempting USAePay request [${authObj.name}] at ${url}`);
+          this.logger.log(
+            `Attempting USAePay request [${authObj.name}] at ${url}`,
+          );
           const response = await axios.post(url, payload, {
             headers: {
               Authorization: authObj.header,
@@ -164,7 +164,10 @@ export class PaymentService {
 
       this.logger.log(`Initiating USAePay sale for amount: $${amountStr}`);
 
-      const response = await this.executeUSAePayRequest('transactions', payload);
+      const response = await this.executeUSAePayRequest(
+        'transactions',
+        payload,
+      );
 
       console.log('----------->', response.data);
 
@@ -284,18 +287,48 @@ export class PaymentService {
         payload.key = apiKey;
       }
 
-      if (dto.customerId) {
-        payload.customer_id = dto.customerId;
-      } else if (ride.customerNumber) {
-        const customer = await this.customerModel.findOne({
-          mobileNumber: ride.customerNumber,
-        });
+      let targetTokenOrId = dto.customerId;
+      if (!targetTokenOrId && ride.customerNumber) {
+        const cleanNumber = (ride.customerNumber || '').trim();
+        const variations = [
+          cleanNumber,
+          cleanNumber.replace(/^\+/, ''),
+          cleanNumber.startsWith('+91') ? cleanNumber.slice(3) : cleanNumber,
+          cleanNumber.startsWith('+1') ? cleanNumber.slice(2) : cleanNumber,
+        ];
+        const customer =
+          (await this.customerModel.findOne({
+            mobileNumber: { $in: variations },
+            usaepayCustomerId: { $exists: true, $ne: '' },
+          })) ||
+          (await this.customerModel.findOne({
+            mobileNumber: { $in: variations },
+          }));
         if (customer && customer.usaepayCustomerId) {
-          payload.customer_id = customer.usaepayCustomerId;
+          targetTokenOrId = customer.usaepayCustomerId;
         }
       }
 
-      const response = await this.executeUSAePayRequest('transactions', payload);
+      if (!targetTokenOrId) {
+        return new ApiResponse(
+          400,
+          {},
+          'No saved card or customer token found for this customer. Please save a card first.',
+        );
+      }
+
+      // USAePay tokens are passed in creditcard: { number: token }
+      // Customer profile IDs are passed in customer_id
+      if (targetTokenOrId.includes('-') || targetTokenOrId.length > 15) {
+        payload.creditcard = { number: targetTokenOrId };
+      } else {
+        payload.customer_id = targetTokenOrId;
+      }
+
+      const response = await this.executeUSAePayRequest(
+        'transactions',
+        payload,
+      );
 
       const resData = response.data;
       const isApproved =
@@ -373,61 +406,60 @@ export class PaymentService {
       const cleanCard = (dto.cardNumber || '').replace(/[\s-]/g, '');
       const cleanExp = this.normalizeExpiration(dto.expiration);
 
-      // Tokenize the card in USAePay vault using cc:save command
-      const payload: any = {
-        command: 'cc:save',
+      const tokenPayload: any = {
         creditcard: {
           number: cleanCard,
           expiration: cleanExp,
-          cvv: dto.cvv,
           cvc: dto.cvv,
-          cardholder:
-            dto.cardholder || customer.fullName || 'Valued Customer',
+          cardholder: dto.cardholder || customer.fullName || 'Valued Customer',
         },
       };
 
-      if (apiKey) {
-        payload.key = apiKey;
-      }
-
       this.logger.log(
-        `Tokenizing card for customer: ${dto.customerNumber} with cc:save`,
+        `Tokenizing card for customer: ${dto.customerNumber} via /tokens`,
       );
 
       let response: any;
       try {
-        response = await this.executeUSAePayRequest('transactions', payload);
+        response = await this.executeUSAePayRequest('tokens', tokenPayload);
       } catch (err) {
-        // Fallback to customers endpoint
-        const custPayload: any = {
-          name: dto.cardholder || customer.fullName || 'Valued Customer',
-          phone: dto.customerNumber,
-          payment_methods: [
-            {
-              card: {
-                number: cleanCard,
-                expiration: cleanExp,
-                cvv: dto.cvv,
-                cardholder:
-                  dto.cardholder || customer.fullName || 'Valued Customer',
-              },
-            },
-          ],
+        // Fallback to cc:save command on transactions
+        const fallbackPayload: any = {
+          command: 'cc:save',
+          creditcard: {
+            number: cleanCard,
+            expiration: cleanExp,
+            cvv: dto.cvv,
+            cvc: dto.cvv,
+            cardholder:
+              dto.cardholder || customer.fullName || 'Valued Customer',
+          },
         };
-        response = await this.executeUSAePayRequest('customers', custPayload);
+        response = await this.executeUSAePayRequest(
+          'transactions',
+          fallbackPayload,
+        );
       }
 
       const resData = response.data;
       const customerId =
+        resData.key ||
+        resData.token ||
+        resData.savedcard?.key ||
         resData.savedcard?.token ||
         resData.refnum ||
         resData.custnum ||
-        resData.key ||
         resData.id;
-      const last4 =
-        resData.savedcard?.last4 ||
-        (cleanCard ? cleanCard.slice(-4) : '****');
-      const cardType = resData.savedcard?.type || 'Credit Card';
+
+      const last4 = cleanCard ? cleanCard.slice(-4) : '****';
+      let cardType = resData.savedcard?.type;
+      if (!cardType) {
+        if (/^4/.test(cleanCard)) cardType = 'Visa';
+        else if (/^5[1-5]/.test(cleanCard)) cardType = 'MasterCard';
+        else if (/^3[47]/.test(cleanCard)) cardType = 'American Express';
+        else if (/^6(?:011|5)/.test(cleanCard)) cardType = 'Discover';
+        else cardType = 'Credit Card';
+      }
 
       customer.usaepayCustomerId = customerId;
       customer.cardLast4 = last4;
@@ -526,6 +558,59 @@ export class PaymentService {
         200,
         { logs, total, page, limit },
         Msg.DATA_FETCHED,
+      );
+    } catch (error) {
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async getCustomerCardDetails(customerNumber: string) {
+    try {
+      const cleanNumber = (customerNumber || '').trim();
+      const variations = [
+        cleanNumber,
+        cleanNumber.replace(/^\+/, ''),
+        cleanNumber.startsWith('+91') ? cleanNumber.slice(3) : cleanNumber,
+        cleanNumber.startsWith('+1') ? cleanNumber.slice(2) : cleanNumber,
+      ];
+
+      const customer =
+        (await this.customerModel.findOne({
+          mobileNumber: { $in: variations },
+          usaepayCustomerId: { $exists: true, $ne: '' },
+        })) ||
+        (await this.customerModel.findOne({
+          mobileNumber: { $in: variations },
+        }));
+
+      if (!customer || !customer.usaepayCustomerId) {
+        return new ApiResponse(
+          200,
+          {
+            hasCard: false,
+            customerNumber: cleanNumber,
+            maskedCardNumber: null,
+            cardMasked: null,
+            cardLast4: null,
+            cardBrand: null,
+          },
+          'No card on file for this customer',
+        );
+      }
+
+      const last4 = customer.cardLast4 || '****';
+      const maskedCard = `**** **** **** ${last4}`;
+
+      return new ApiResponse(
+        200,
+        {
+          hasCard: true,
+          customerNumber: customer.mobileNumber,
+          cardMasked: maskedCard,
+          cardLast4: last4,
+          cardBrand: customer.cardBrand || 'Card',
+        },
+        'Customer card details fetched successfully',
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);

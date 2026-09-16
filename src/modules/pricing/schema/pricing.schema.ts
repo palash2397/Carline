@@ -29,10 +29,10 @@ export class PricingRule {
   days: DayOfWeekEnum[];
 
   @Prop({ type: Number, default: 0, min: 0, max: 23 })
-  startHour: number; // 0 to 23
+  startHour: number;
 
   @Prop({ type: Number, default: 23, min: 0, max: 23 })
-  endHour: number; // 0 to 23
+  endHour: number;
 
   @Prop({ type: Number, required: true, default: 2.0 })
   baseFare: number;

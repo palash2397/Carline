@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiHeader, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { ProcessCardPaymentDto } from './dto/process-card-payment.dto';
 import { ChargeRidePaymentDto } from './dto/charge-ride-payment.dto';
@@ -42,8 +42,31 @@ export class PaymentController {
 
   @Post('/ivr-charge')
   @UseGuards(ApiKeyGuard)
+  @ApiHeader({
+    name: 'x-api-key',
+    description: 'API key for IVR service access',
+    required: true,
+  })
   async ivrChargeRideVault(@Body() dto: ChargeRidePaymentDto) {
     return this.paymentService.chargeRideVault(dto);
+  }
+
+  @Get('/customer-card/:customerNumber')
+  @UseGuards(ApiKeyGuard)
+  @ApiHeader({
+    name: 'x-api-key',
+    description: 'API key for IVR service access',
+    required: true,
+  })
+  @ApiParam({
+    name: 'customerNumber',
+    description: 'Customer mobile number (e.g. 9074775130)',
+    example: '9074775130',
+  })
+  async getCustomerCardDetails(
+    @Param('customerNumber') customerNumber: string,
+  ) {
+    return this.paymentService.getCustomerCardDetails(customerNumber);
   }
 
   @Post('/refund')
