@@ -21,7 +21,7 @@ export class PaymentLog {
   currency: string;
 
   @Prop({ type: String, required: true })
-  paymentType: string; // 'CREDIT_CARD', 'CUSTOMER_ACCOUNT', 'CASH', 'OVERRIDE'
+  paymentType: string; // 'CREDIT_CARD', 'SAVED_CARD', 'CUSTOMER_ACCOUNT', 'CASH', 'OVERRIDE'
 
   @Prop({ type: String, required: true })
   status: string; // 'PENDING', 'APPROVED', 'DECLINED', 'REFUNDED', 'FAILED'

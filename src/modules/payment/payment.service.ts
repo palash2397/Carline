@@ -429,7 +429,7 @@ export class PaymentService {
         resData?.refnum || resData?.key || resData?.id || '';
       const authCode = resData?.authcode || '';
 
-      ride.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+      ride.paymentType = PaymentType.SAVED_CARD;
       ride.paymentStatus = isApproved
         ? PaymentStatus.COMPLETED
         : PaymentStatus.FAILED;
@@ -454,7 +454,7 @@ export class PaymentService {
         customerNumber: ride.customerNumber,
         amount: amountToCharge,
         currency: 'USD',
-        paymentType: PaymentType.CUSTOMER_ACCOUNT,
+        paymentType: PaymentType.SAVED_CARD,
         status: isApproved ? PaymentStatus.APPROVED : PaymentStatus.DECLINED,
         transactionId: transactionId,
         authCode: authCode,

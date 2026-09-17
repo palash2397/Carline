@@ -439,9 +439,9 @@ export class IvrService {
               Msg.RIDE_COMPLETED,
             );
           } else if (dto.dtmfInput === '3') {
-            activeRide.paymentType = 'CUSTOMER_ACCOUNT';
+            activeRide.paymentType = PaymentType.SAVED_CARD;
 
-            // Trigger USAePay charge via customer account
+            // Trigger USAePay charge via customer account / saved card
             await this.paymentService.chargeRideVault({
               tripNumber: activeRide.tripNumber,
               amount: activeRide.rideAmount,
