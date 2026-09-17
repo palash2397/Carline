@@ -411,6 +411,10 @@ export class IvrService {
 
             await activeRide.save();
             await driver.save();
+            await this.paymentService.logCashPayment(
+              activeRide,
+              activeRide.rideAmount,
+            );
             return new ApiResponse(
               200,
               { action: 'SAY_PAYMENT_CASH_SUCCESS' },

@@ -302,8 +302,8 @@ export class PaymentService {
         tripNumber: dto.tripNumber || '',
         amount: dto.amount,
         currency: 'USD',
-        paymentType: 'CREDIT_CARD',
-        status: 'FAILED',
+        paymentType: PaymentType.CREDIT_CARD,
+        status: PaymentStatus.FAILED,
         errorMessage: errorMsg,
         gatewayResponse: error.response?.data || {},
       });
@@ -404,6 +404,22 @@ export class PaymentService {
       }
 
       if (!targetTokenOrId) {
+        try {
+          const log = new this.paymentLogModel({
+            rideId: ride._id.toString(),
+            tripNumber: dto.tripNumber,
+            customerNumber: ride.customerNumber,
+            amount: amountToCharge,
+            currency: 'USD',
+            paymentType: PaymentType.SAVED_CARD,
+            status: PaymentStatus.FAILED,
+            errorMessage: Msg.NO_SAVED_CARD,
+          });
+          await log.save();
+        } catch (logErr) {
+          this.logger.error(`Failed to save payment log: ${logErr?.message}`);
+        }
+
         return new ApiResponse(400, {}, Msg.NO_SAVED_CARD);
       }
 
@@ -503,6 +519,29 @@ export class PaymentService {
         error?.response?.data?.message ||
         error?.message ||
         Msg.PAYMENT_FAILED;
+
+      this.logger.error(`USAePay Vault Charge Error: ${errorMsg}`);
+
+      try {
+        const ride = await this.rideModel
+          .findOne({ tripNumber: dto.tripNumber })
+          .catch(() => null);
+
+        const log = new this.paymentLogModel({
+          rideId: ride?._id ? ride._id.toString() : '',
+          tripNumber: dto.tripNumber || '',
+          customerNumber: ride?.customerNumber || '',
+          amount: dto.amount || ride?.rideAmount || 0,
+          currency: 'USD',
+          paymentType: PaymentType.SAVED_CARD,
+          status: PaymentStatus.FAILED,
+          errorMessage: errorMsg,
+          gatewayResponse: error?.response?.data || {},
+        });
+        await log.save();
+      } catch (logErr: any) {
+        this.logger.error(`Failed to save payment log: ${logErr?.message}`);
+      }
 
       return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
     }
@@ -650,6 +689,23 @@ export class PaymentService {
         error?.message ||
         Msg.PAYMENT_FAILED;
 
+      this.logger.error(`USAePay Refund Error: ${errorMsg}`);
+
+      try {
+        const log = new this.paymentLogModel({
+          amount: dto.amount,
+          currency: 'USD',
+          paymentType: PaymentType.REFUND,
+          status: PaymentStatus.FAILED,
+          transactionId: dto.transactionId || '',
+          errorMessage: errorMsg,
+          gatewayResponse: error?.response?.data || {},
+        });
+        await log.save();
+      } catch (logErr: any) {
+        this.logger.error(`Failed to save refund payment log: ${logErr?.message}`);
+      }
+
       return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
     }
   }
@@ -734,4 +790,23 @@ export class PaymentService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async logCashPayment(ride: RideDocument, amount: number) {
+    try {
+      const log = new this.paymentLogModel({
+        rideId: ride._id ? ride._id.toString() : '',
+        tripNumber: ride.tripNumber || '',
+        customerNumber: ride.customerNumber || '',
+        amount: amount || ride.rideAmount || 0,
+        currency: 'USD',
+        paymentType: PaymentType.CASH,
+        status: PaymentStatus.COMPLETED,
+        errorMessage: '',
+      });
+      await log.save();
+    } catch (err: any) {
+      this.logger.error(`Failed to save cash payment log: ${err?.message}`);
+    }
+  }
 }
+
