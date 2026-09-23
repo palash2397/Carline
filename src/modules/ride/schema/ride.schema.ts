@@ -32,7 +32,7 @@ export class Ride {
   @Prop()
   callDuration: string;
 
-  @Prop()
+  @Prop({ type: String, default: null })
   payment: string;
 
   @Prop()
@@ -41,10 +41,10 @@ export class Ride {
   @Prop({ type: Number, default: 0 })
   rideAmount: number;
 
-  @Prop()
+  @Prop({ type: String, default: null })
   paymentType: string;
 
-  @Prop()
+  @Prop({ type: String, default: 'PENDING' })
   paymentStatus: string;
 
   @Prop()

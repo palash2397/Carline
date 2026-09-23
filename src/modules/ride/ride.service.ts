@@ -9,6 +9,7 @@ import { BookIvrRideDto } from './dto/book-ivr-ride.dto';
 import { AdminDispatchDto } from './dto/admin-dispatch.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
+import { PaymentStatus } from 'src/common/enums/payment/payment-status';
 
 import axios from 'axios';
 
@@ -36,12 +37,20 @@ export class RideService {
       }
 
       const total = await this.rideModel.countDocuments(searchFilter);
-      const data = await this.rideModel
+      const rawData = await this.rideModel
         .find(searchFilter)
         .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limit)
+        .lean()
         .exec();
+
+      const data = rawData.map((ride: any) => ({
+        ...ride,
+        payment: ride.payment || null,
+        paymentType: ride.paymentType || null,
+        paymentStatus: ride.paymentStatus || PaymentStatus.PENDING,
+      }));
 
       return new ApiResponse(
         200,
@@ -89,6 +98,9 @@ export class RideService {
         rideStartDateTime: dto.rideStart,
         rideStatus: initialStatus,
         tripNumber: tripNumber,
+        payment: null,
+        paymentType: null,
+        paymentStatus: PaymentStatus.PENDING,
       });
 
       await newRide.save();
@@ -123,6 +135,9 @@ export class RideService {
         queueName: dto.queueName,
         rideStatus: 'PENDING',
         tripNumber: tripNumber,
+        payment: null,
+        paymentType: null,
+        paymentStatus: PaymentStatus.PENDING,
       });
 
       await newRide.save();
