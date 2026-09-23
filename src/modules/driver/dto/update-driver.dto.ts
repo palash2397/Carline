@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class UpdateDriverDto {
   @ApiProperty({
@@ -73,4 +73,14 @@ export class UpdateDriverDto {
   @IsOptional()
   @IsString()
   assignQueue?: string;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Batch number (1, 2, or 3)',
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  batch?: number;
 }
+

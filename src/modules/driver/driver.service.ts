@@ -12,10 +12,12 @@ import { UpdateDriverBatchDto } from './dto/update-batch.dto';
 import { BulkUpdateDriverBatchDto } from './dto/bulk-update-batch.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { DriverSettlementDto } from './dto/driver-settlement.dto';
+
 import {
   DriverEarningsAudit,
   DriverEarningsAuditDocument,
 } from './schema/driver-earnings-audit.schema';
+
 import { UserRole } from 'src/common/enums/user/role.enum';
 
 @Injectable()
@@ -271,15 +273,31 @@ export class DriverService {
 
   async updateDriver(dto: UpdateDriverDto) {
     try {
-      const existingDriver = await this.driverModel.findById(dto.id);
+      let existingDriver = await this.driverModel
+        .findById(dto.id)
+        .catch(() => null);
+
+      if (!existingDriver) {
+        const numId = Number(dto.id);
+        if (!isNaN(numId)) {
+          existingDriver = await this.driverModel.findOne({ driverId: numId });
+        }
+      }
 
       if (!existingDriver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
 
+      const updateData: any = { ...dto };
+      delete updateData.id;
+
+      if (dto.batch !== undefined && dto.batch !== null) {
+        updateData.batch = Number(dto.batch);
+      }
+
       const updatedDriver = await this.driverModel.findByIdAndUpdate(
         existingDriver._id,
-        { $set: dto },
+        { $set: updateData },
         { new: true, runValidators: true },
       );
 
@@ -598,18 +616,42 @@ export class DriverService {
 
   async updateTheBatch(dto: UpdateDriverBatchDto) {
     try {
-      const driver = await this.driverModel.findOne({
-        _id: dto.driverId,
-      });
+      let driver = await this.driverModel
+        .findById(dto.driverId)
+        .catch(() => null);
+
+      if (!driver) {
+        const numId = Number(dto.driverId);
+        if (!isNaN(numId)) {
+          driver = await this.driverModel.findOne({ driverId: numId });
+        }
+      }
+
+      if (!driver) {
+        driver = await this.driverModel.findOne({
+          mobileNumber: dto.driverId,
+        });
+      }
+
       if (!driver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
-      driver.batch = dto.batchNumber;
+
+      const targetBatch =
+        dto.batchNumber !== undefined
+          ? Number(dto.batchNumber)
+          : dto.batch !== undefined
+            ? Number(dto.batch)
+            : 1;
+
+      driver.batch = targetBatch;
       await driver.save();
-      let driverObj = {
+
+      const driverObj = {
         _id: driver._id,
         driverId: driver.driverId,
         batchNumber: driver.batch,
+        batch: driver.batch,
       };
       return new ApiResponse(200, driverObj, Msg.DRIVER_BATCH_UPDATED);
     } catch (error) {

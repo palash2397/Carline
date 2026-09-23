@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsMongoId, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class UpdateDriverBatchDto {
   @ApiProperty({
@@ -9,15 +9,25 @@ export class UpdateDriverBatchDto {
     required: true,
   })
   @IsNotEmpty()
-  @IsMongoId()
+  @IsString()
   driverId: string;
 
   @ApiProperty({
     example: 1,
     description: 'Batch Number',
-    required: true,
+    required: false,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
-  batchNumber: number;
+  batchNumber?: number;
+
+  @ApiProperty({
+    example: 1,
+    description: 'Batch Number (alias)',
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  batch?: number;
 }
+
