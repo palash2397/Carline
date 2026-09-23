@@ -252,6 +252,26 @@ export class DriverService {
 
   async createDriver(dto: any) {
     try {
+      const rawMobile = dto.mobileNumber || '';
+      const cleanMobile = rawMobile.replace(/\D/g, '');
+      if (!cleanMobile) {
+        return new ApiResponse(400, {}, 'Valid mobile number is required');
+      }
+
+      const existing = await this.driverModel.findOne({
+        $or: [
+          { mobileNumber: cleanMobile },
+          { mobileNumber: rawMobile },
+        ],
+      });
+      if (existing) {
+        return new ApiResponse(
+          400,
+          {},
+          'A driver with this mobile number already exists',
+        );
+      }
+
       const lastDriver = await this.driverModel
         .findOne()
         .sort({ driverId: -1 });
@@ -260,6 +280,7 @@ export class DriverService {
 
       const newDriver = new this.driverModel({
         ...dto,
+        mobileNumber: cleanMobile,
         driverId: newDriverId,
       });
 
@@ -291,8 +312,42 @@ export class DriverService {
       const updateData: any = { ...dto };
       delete updateData.id;
 
+      if (dto.mobileNumber) {
+        const cleanMobile = dto.mobileNumber.replace(/\D/g, '');
+        const duplicate = await this.driverModel.findOne({
+          _id: { $ne: existingDriver._id },
+          $or: [
+            { mobileNumber: cleanMobile },
+            { mobileNumber: dto.mobileNumber },
+          ],
+        });
+        if (duplicate) {
+          return new ApiResponse(
+            400,
+            {},
+            'Another driver with this mobile number already exists',
+          );
+        }
+        updateData.mobileNumber = cleanMobile;
+      }
+
       if (dto.batch !== undefined && dto.batch !== null) {
         updateData.batch = Number(dto.batch);
+      }
+
+      if (
+        updateData.status === 'Block' ||
+        updateData.status === 'INACTIVE'
+      ) {
+        updateData.isLoggedIn = false;
+        updateData.isAvailable = false;
+        updateData.loginLogout = 'STOP';
+      } else if (updateData.loginLogout === 'STOP') {
+        updateData.isLoggedIn = false;
+        updateData.isAvailable = false;
+      } else if (updateData.loginLogout === 'START') {
+        updateData.isLoggedIn = true;
+        updateData.isAvailable = true;
       }
 
       const updatedDriver = await this.driverModel.findByIdAndUpdate(

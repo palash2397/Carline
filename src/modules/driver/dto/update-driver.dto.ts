@@ -82,5 +82,23 @@ export class UpdateDriverDto {
   @IsOptional()
   @IsNumber()
   batch?: number;
+
+  @ApiProperty({
+    example: 'ACTIVE',
+    description: 'Driver status (ACTIVE, Block, Unblock, INACTIVE)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiProperty({
+    example: 'START',
+    description: 'Login/Logout status (START, STOP)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  loginLogout?: string;
 }
 

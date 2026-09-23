@@ -29,19 +29,33 @@ export class IvrService {
     private paymentService: PaymentService,
   ) {}
 
+  private async findDriverByPhoneNumber(
+    rawPhone: string,
+  ): Promise<DriverDocument | null> {
+    if (!rawPhone) return null;
+    const cleanDigits = rawPhone.replace(/\D/g, '');
+    const last10 =
+      cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+    const conditions: any[] = [{ mobileNumber: rawPhone }];
+    if (cleanDigits) {
+      conditions.push({ mobileNumber: cleanDigits });
+      conditions.push({
+        mobileNumber: { $regex: cleanDigits, $options: 'i' },
+      });
+    }
+    if (last10 && last10 !== cleanDigits) {
+      conditions.push({ mobileNumber: last10 });
+      conditions.push({ mobileNumber: { $regex: last10, $options: 'i' } });
+    }
+
+    return this.driverModel.findOne({ $or: conditions });
+  }
+
   async processDriverCard(dto: IvrDriverCardDto) {
     try {
       const callerNumber = dto.callerNumber || '';
-      const numberDigits = callerNumber.replace(/\D/g, '');
-
-      const driver = await this.driverModel.findOne({
-        $or: [
-          { mobileNumber: callerNumber },
-          ...(numberDigits && numberDigits.length >= 7
-            ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
-            : []),
-        ],
-      });
+      const driver = await this.findDriverByPhoneNumber(callerNumber);
 
       if (!driver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
@@ -192,25 +206,31 @@ export class IvrService {
     }
   }
 
+  private isDriverBlocked(driver: DriverDocument): boolean {
+    return (
+      driver.status === 'Block' ||
+      driver.status === 'INACTIVE'
+    );
+  }
+
   async processDriverAction(dto: IvrDriverActionDto) {
     const callerNumber =
       dto.callerNumber || dto.driverNumber || dto.phoneNumber || '';
-    const numberDigits = callerNumber.replace(/\D/g, '');
-
-    const driver = await this.driverModel.findOne({
-      $or: [
-        { mobileNumber: callerNumber },
-        ...(numberDigits && numberDigits.length >= 7
-          ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
-          : []),
-      ],
-    });
+    const driver = await this.findDriverByPhoneNumber(callerNumber);
 
     if (!driver) {
       return new ApiResponse(
         403,
         { action: 'HANGUP' },
         Msg.DRIVER_UNRECOGNIZED,
+      );
+    }
+
+    if (this.isDriverBlocked(driver) && !driver.activeRideId) {
+      return new ApiResponse(
+        403,
+        { action: 'SAY_ACCOUNT_LOCKED' },
+        'Your driver account is locked out or inactive. Please contact dispatch.',
       );
     }
 
@@ -503,10 +523,19 @@ export class IvrService {
         );
       }
 
+      if (this.isDriverBlocked(driver)) {
+        return new ApiResponse(
+          403,
+          { action: 'SAY_ACCOUNT_LOCKED' },
+          'Your driver account is locked out or inactive. Please contact dispatch.',
+        );
+      }
+
       if (dto.dtmfInput === '1' && !driver.isLoggedIn) {
         driver.isLoggedIn = true;
         driver.isAvailable = true;
         driver.queueType = 'BOTH';
+        driver.loginLogout = 'START';
         await driver.save();
         return new ApiResponse(
           200,
@@ -516,6 +545,7 @@ export class IvrService {
       } else if (dto.dtmfInput === '2' && driver.isLoggedIn) {
         driver.isLoggedIn = false;
         driver.isAvailable = false;
+        driver.loginLogout = 'STOP';
         await driver.save();
         return new ApiResponse(
           200,
@@ -715,10 +745,16 @@ export class IvrService {
   >();
 
   async processDispatchAction(dto: IvrDispatchActionDto) {
-    const driver = await this.driverModel.findOne({
-      mobileNumber: dto.driverNumber,
-    });
+    const driver = await this.findDriverByPhoneNumber(dto.driverNumber);
     if (!driver) return new ApiResponse(403, {}, Msg.DRIVER_NOT_FOUND);
+
+    if (this.isDriverBlocked(driver)) {
+      return new ApiResponse(
+        403,
+        { action: 'SAY_ACCOUNT_LOCKED' },
+        'Your driver account is locked out or inactive. Please contact dispatch.',
+      );
+    }
 
     if (!dto.dispatchId && !dto.tripNumber) {
       return new ApiResponse(
@@ -843,6 +879,7 @@ export class IvrService {
       const query: any = {
         isLoggedIn: true,
         isAvailable: true,
+        status: { $nin: ['Block', 'INACTIVE'] },
       };
 
       if (queueType) {
@@ -899,21 +936,34 @@ export class IvrService {
 
   async getDriverStatus(mobileNumber: string) {
     try {
-      const numberDigits = (mobileNumber || '').replace(/\D/g, '');
-      const driver = await this.driverModel.findOne({
-        $or: [
-          { mobileNumber },
-          ...(numberDigits && numberDigits.length >= 7
-            ? [{ mobileNumber: { $regex: numberDigits, $options: 'i' } }]
-            : []),
-        ],
-      });
+      const driver = await this.findDriverByPhoneNumber(mobileNumber);
 
       if (!driver) {
         return new ApiResponse(
           404,
           { registered: false },
           Msg.DRIVER_NOT_FOUND,
+        );
+      }
+
+      if (this.isDriverBlocked(driver)) {
+        return new ApiResponse(
+          200,
+          {
+            registered: true,
+            driverId: driver.driverId || driver._id,
+            driverName: driver.driverName,
+            status: driver.status || 'Block',
+            lockedOut: true,
+            isLockedOut: true,
+            loggedIn: false,
+            available: false,
+            workflowStage: 'LOCKED_OUT',
+            activeTrip: false,
+            trip: null,
+            activeTripData: null,
+          },
+          'Driver account is locked out or inactive',
         );
       }
 
@@ -1175,6 +1225,9 @@ export class IvrService {
           driverId: driver.driverId || driver._id,
           driverName: driver.driverName,
           phoneNumber: driver.mobileNumber,
+          status: driver.status || 'ACTIVE',
+          lockedOut: false,
+          isLockedOut: false,
           loggedIn: driver.isLoggedIn,
           serviceType: driver.queueType,
           available: driver.isAvailable,
