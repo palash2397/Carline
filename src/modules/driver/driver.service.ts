@@ -336,6 +336,10 @@ export class DriverService {
         updateData.batch = Number(dto.batch);
       }
 
+      if (dto.status === 'Unblock') {
+        updateData.status = 'ACTIVE';
+      }
+
       if (dto.assignQueue) {
         const norm = dto.assignQueue.toUpperCase().trim();
         if (norm === 'LOCAL' || norm === 'LOCAL_RIDES') {
@@ -344,6 +348,18 @@ export class DriverService {
           updateData.queueType = 'LONG_DISTANCE';
         } else if (norm === 'BOTH' || norm === 'ALL_RIDES' || norm === 'ALL') {
           updateData.queueType = 'BOTH';
+        }
+      } else if (dto.queueType) {
+        const norm = dto.queueType.toUpperCase().trim();
+        if (norm === 'LOCAL' || norm === 'LOCAL_RIDES') {
+          updateData.queueType = 'LOCAL';
+          updateData.assignQueue = 'Local_Rides';
+        } else if (norm === 'LONG_DISTANCE' || norm === 'LONG_DISTANCE_RIDE') {
+          updateData.queueType = 'LONG_DISTANCE';
+          updateData.assignQueue = 'Long_Distance_Ride';
+        } else if (norm === 'BOTH' || norm === 'ALL_RIDES' || norm === 'ALL') {
+          updateData.queueType = 'BOTH';
+          updateData.assignQueue = 'BOTH';
         }
       }
 
@@ -354,12 +370,25 @@ export class DriverService {
         updateData.isLoggedIn = false;
         updateData.isAvailable = false;
         updateData.loginLogout = 'STOP';
-      } else if (updateData.loginLogout === 'STOP') {
+        updateData.logoutTime = new Date().toISOString();
+      } else if (
+        updateData.loginLogout?.toUpperCase() === 'STOP' ||
+        updateData.loginLogout?.toUpperCase() === 'LOGOUT' ||
+        updateData.isLoggedIn === false
+      ) {
+        updateData.loginLogout = 'STOP';
         updateData.isLoggedIn = false;
         updateData.isAvailable = false;
-      } else if (updateData.loginLogout === 'START') {
+        updateData.logoutTime = new Date().toISOString();
+      } else if (
+        updateData.loginLogout?.toUpperCase() === 'START' ||
+        updateData.loginLogout?.toUpperCase() === 'LOGIN' ||
+        updateData.isLoggedIn === true
+      ) {
+        updateData.loginLogout = 'START';
         updateData.isLoggedIn = true;
         updateData.isAvailable = true;
+        updateData.loginTime = new Date().toISOString();
       }
 
       const updatedDriver = await this.driverModel.findByIdAndUpdate(

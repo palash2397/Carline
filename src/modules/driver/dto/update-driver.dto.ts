@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class UpdateDriverDto {
   @ApiProperty({
@@ -66,6 +72,42 @@ export class UpdateDriverDto {
   licenceNumber?: string;
 
   @ApiProperty({
+    example: 'K-4282',
+    description: 'Vehicle Number',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  vehicleNumber?: string;
+
+  @ApiProperty({
+    example: 'GRAY',
+    description: 'Vehicle Color',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @ApiProperty({
+    example: '1',
+    description: 'Country Code',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+
+  @ApiProperty({
+    example: '',
+    description: 'Alternate Phone Number',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  alternateNumber?: string;
+
+  @ApiProperty({
     example: 'Local Rides',
     description: 'Assigned Queue',
     required: false,
@@ -73,6 +115,15 @@ export class UpdateDriverDto {
   @IsOptional()
   @IsString()
   assignQueue?: string;
+
+  @ApiProperty({
+    example: 'LOCAL',
+    description: 'Queue Type (LOCAL, LONG_DISTANCE, BOTH)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  queueType?: string;
 
   @ApiProperty({
     example: 1,
@@ -100,5 +151,68 @@ export class UpdateDriverDto {
   @IsOptional()
   @IsString()
   loginLogout?: string;
+
+  @ApiProperty({
+    example: true,
+    description: 'Is Driver Logged In',
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isLoggedIn?: boolean;
+
+  @ApiProperty({
+    example: true,
+    description: 'Is Driver Available',
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
+
+  @ApiProperty({
+    example: 'ADM 1',
+    description: 'ADM Option',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  admOption?: string;
+
+  @ApiProperty({
+    example: '1',
+    description: 'Priority',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  priority?: string;
+
+  @ApiProperty({
+    example: 'Active',
+    description: 'Queue Time Status',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  queueTimeStatus?: string;
+
+  @ApiProperty({
+    example: '2026-09-24T12:00:00.000Z',
+    description: 'Login Time',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  loginTime?: string;
+
+  @ApiProperty({
+    example: '2026-09-24T12:00:00.000Z',
+    description: 'Logout Time',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  logoutTime?: string;
 }
 
