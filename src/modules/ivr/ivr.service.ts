@@ -1309,6 +1309,189 @@ export class IvrService {
     }
   }
 
+  private async findCustomerByPhoneNumber(
+    rawPhone: string,
+  ): Promise<CustomerDocument | null> {
+    if (!rawPhone) return null;
+    const cleanDigits = rawPhone.replace(/\D/g, '');
+    const last10 =
+      cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+    const conditions: any[] = [{ mobileNumber: rawPhone }];
+    if (cleanDigits) {
+      conditions.push({ mobileNumber: cleanDigits });
+      conditions.push({
+        mobileNumber: { $regex: cleanDigits, $options: 'i' },
+      });
+    }
+    if (last10 && last10 !== cleanDigits) {
+      conditions.push({ mobileNumber: last10 });
+      conditions.push({ mobileNumber: { $regex: last10, $options: 'i' } });
+    }
+
+    return this.customerModel
+      .findOne({ $or: conditions })
+      .sort({ createdAt: -1, _id: -1 });
+  }
+
+  async getCustomerStatus(mobileNumber: string) {
+    try {
+      if (!mobileNumber) {
+        return new ApiResponse(400, {}, 'Mobile number is required');
+      }
+
+      const customer = await this.findCustomerByPhoneNumber(mobileNumber);
+
+      const cleanDigits = mobileNumber.replace(/\D/g, '');
+      const last10 =
+        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+      const customerPhoneQueries: any[] = [{ customerNumber: mobileNumber }];
+      if (cleanDigits) {
+        customerPhoneQueries.push({ customerNumber: cleanDigits });
+        customerPhoneQueries.push({
+          customerNumber: { $regex: cleanDigits, $options: 'i' },
+        });
+      }
+      if (last10 && last10 !== cleanDigits) {
+        customerPhoneQueries.push({ customerNumber: last10 });
+        customerPhoneQueries.push({
+          customerNumber: { $regex: last10, $options: 'i' },
+        });
+      }
+
+      // 1. Look for active/ongoing ride
+      const activeRide = await this.rideModel
+        .findOne({
+          $or: customerPhoneQueries,
+          rideStatus: {
+            $in: [
+              RideStatus.PENDING,
+              RideStatus.ACCEPTED,
+              RideStatus.STARTED,
+              RideStatus.PAYMENT_PENDING,
+              'PENDING',
+              'ACCEPTED',
+              'STARTED',
+              'PAYMENT_PENDING',
+            ],
+          },
+          paymentStatus: { $ne: 'COMPLETED' },
+        })
+        .sort({ createdAt: -1 });
+
+      // 2. Fallback: look for most recent ride if no active ride
+      let recentRide: RideDocument | null = null;
+      if (!activeRide) {
+        recentRide = await this.rideModel
+          .findOne({
+            $or: customerPhoneQueries,
+          })
+          .sort({ createdAt: -1 });
+      }
+
+      const rideToReport = activeRide || recentRide;
+      let driverDetails: any = null;
+
+      if (rideToReport) {
+        let driver: DriverDocument | null = null;
+        if (rideToReport.driverId) {
+          driver = await this.driverModel
+            .findById(rideToReport.driverId)
+            .catch(() => null);
+          if (!driver) {
+            const numId = Number(rideToReport.driverId);
+            if (!isNaN(numId)) {
+              driver = await this.driverModel.findOne({ driverId: numId });
+            }
+          }
+        }
+        if (!driver && rideToReport.driverNumber) {
+          driver = await this.findDriverByPhoneNumber(rideToReport.driverNumber);
+        }
+
+        if (driver) {
+          driverDetails = {
+            driverId: driver.driverId || driver._id,
+            driverName: driver.driverName || rideToReport.driverName || '',
+            mobileNumber: driver.mobileNumber || rideToReport.driverNumber || '',
+            vehicleNumber: driver.vehicleNumber || '',
+            makeModel: driver.makeModel || '',
+            color: driver.color || '',
+            licenceNumber: driver.licenceNumber || '',
+            batch: driver.batch || 1,
+            countryCode: driver.countryCode || '',
+          };
+        } else if (rideToReport.driverName || rideToReport.driverNumber) {
+          driverDetails = {
+            driverId: rideToReport.driverId || '',
+            driverName: rideToReport.driverName || '',
+            mobileNumber: rideToReport.driverNumber || '',
+            vehicleNumber: '',
+            makeModel: '',
+            color: '',
+            licenceNumber: '',
+            batch: 1,
+            countryCode: '',
+          };
+        }
+      }
+
+      let tripData: any = null;
+      if (rideToReport) {
+        tripData = {
+          tripId: rideToReport._id,
+          tripNumber: rideToReport.tripNumber,
+          customerName:
+            rideToReport.customerName || (customer ? customer.fullName : ''),
+          customerNumber: rideToReport.customerNumber || mobileNumber,
+          queueName: rideToReport.queueName || '',
+          recordingUrl: rideToReport.recordingUrl || '',
+          rideStatus: rideToReport.rideStatus,
+          status: rideToReport.rideStatus,
+          paymentStatus: rideToReport.paymentStatus || 'PENDING',
+          paymentType: rideToReport.paymentType || null,
+          rideAmount: rideToReport.rideAmount || 0,
+          fareAmount: rideToReport.rideAmount || 0,
+          selectedZone: rideToReport.selectedZone || '',
+          driverAwayMinutes: rideToReport.driverAwayMinutes || '',
+          rideStartDateTime: rideToReport.rideStartDateTime || '',
+          rideCompleteDateTime: rideToReport.rideCompleteDateTime || '',
+          driver: driverDetails,
+        };
+      }
+
+      const hasActiveTrip = !!activeRide && tripData !== null;
+
+      return new ApiResponse(
+        200,
+        {
+          registered: !!customer,
+          customer: customer
+            ? {
+                customerId: customer.customerId || customer._id,
+                fullName: customer.fullName,
+                mobileNumber: customer.mobileNumber,
+                email: customer.email || '',
+                address: customer.address || customer.fullAddress || '',
+                cardLast4: customer.cardLast4 || '',
+                cardBrand: customer.cardBrand || '',
+                hasSavedCard: !!customer.cardLast4,
+                credit: customer.credit || 0,
+              }
+            : null,
+          activeTrip: hasActiveTrip,
+          trip: tripData,
+          driver: driverDetails,
+        },
+        'Customer status fetched successfully',
+      );
+    } catch (error) {
+      console.log('Error in getCustomerStatus:', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
   private async cancelOtherCalls(tripNumber: string) {
     const pythonUrl = process.env.PYTHON_IVR_URL || 'http://localhost:5000';
     try {

@@ -48,4 +48,9 @@ export class IvrController {
   async getDriverStatus(@Param('number') number: string) {
     return this.ivrService.getDriverStatus(number);
   }
+
+  @Get('/customer/status/:number')
+  async getCustomerStatus(@Param('number') number: string) {
+    return this.ivrService.getCustomerStatus(number);
+  }
 }
