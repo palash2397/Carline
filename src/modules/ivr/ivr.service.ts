@@ -533,18 +533,7 @@ export class IvrService {
         );
       }
 
-      if (dto.dtmfInput === '1') {
-        driver.isLoggedIn = true;
-        driver.isAvailable = true;
-        driver.queueType = 'BOTH';
-        driver.loginLogout = 'START';
-        await driver.save();
-        return new ApiResponse(
-          200,
-          { action: 'SAY_LOGGED_IN' },
-          Msg.USER_LOGIN,
-        );
-      } else if (dto.dtmfInput === '2') {
+      if (dto.dtmfInput === '4' || dto.action === 'LOGOUT') {
         driver.isLoggedIn = false;
         driver.isAvailable = false;
         driver.loginLogout = 'STOP';
@@ -553,6 +542,28 @@ export class IvrService {
           200,
           { action: 'SAY_LOGGED_OUT' },
           Msg.USER_LOGGED_OUT,
+        );
+      } else if (dto.dtmfInput === '1') {
+        driver.isLoggedIn = true;
+        driver.isAvailable = true;
+        driver.queueType = 'LOCAL';
+        driver.loginLogout = 'START';
+        await driver.save();
+        return new ApiResponse(
+          200,
+          { action: 'SAY_LOGGED_IN', queueType: 'LOCAL' },
+          Msg.USER_LOGIN,
+        );
+      } else if (dto.dtmfInput === '2') {
+        driver.isLoggedIn = true;
+        driver.isAvailable = true;
+        driver.queueType = 'LONG_DISTANCE';
+        driver.loginLogout = 'START';
+        await driver.save();
+        return new ApiResponse(
+          200,
+          { action: 'SAY_LOGGED_IN', queueType: 'LONG_DISTANCE' },
+          Msg.USER_LOGIN,
         );
       } else if (dto.dtmfInput === '3') {
         driver.isLoggedIn = true;
