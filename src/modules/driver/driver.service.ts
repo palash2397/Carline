@@ -280,6 +280,7 @@ export class DriverService {
 
       const newDriver = new this.driverModel({
         ...dto,
+        status: dto.status || 'ACTIVE',
         mobileNumber: cleanMobile,
         driverId: newDriverId,
       });
@@ -735,10 +736,37 @@ export class DriverService {
 
   async deleteDriver(id: string) {
     try {
-      const driver = await this.driverModel.findByIdAndDelete(id);
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(id)) {
+        driver = await this.driverModel.findById(id);
+      }
+      if (!driver) {
+        const cleanDigits = id ? id.replace(/\D/g, '') : '';
+        driver = await this.driverModel.findOne({
+          $or: [
+            { driverId: parseInt(id) || 0 },
+            { mobileNumber: id },
+            ...(cleanDigits ? [{ mobileNumber: cleanDigits }] : []),
+          ],
+        });
+      }
+
       if (!driver) {
         return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
       }
+
+      const cleanPhone = (driver.mobileNumber || '').replace(/\D/g, '');
+
+      // Delete driver and any remaining duplicate records with the same phone number
+      await this.driverModel.deleteMany({
+        $or: [
+          { _id: driver._id },
+          ...(cleanPhone ? [{ mobileNumber: cleanPhone }] : []),
+          ...(driver.mobileNumber
+            ? [{ mobileNumber: driver.mobileNumber }]
+            : []),
+        ],
+      });
 
       let driverObj = {
         _id: driver._id,

@@ -49,7 +49,9 @@ export class IvrService {
       conditions.push({ mobileNumber: { $regex: last10, $options: 'i' } });
     }
 
-    return this.driverModel.findOne({ $or: conditions });
+    return this.driverModel
+      .findOne({ $or: conditions })
+      .sort({ createdAt: -1, _id: -1 });
   }
 
   async processDriverCard(dto: IvrDriverCardDto) {
@@ -531,7 +533,7 @@ export class IvrService {
         );
       }
 
-      if (dto.dtmfInput === '1' && !driver.isLoggedIn) {
+      if (dto.dtmfInput === '1') {
         driver.isLoggedIn = true;
         driver.isAvailable = true;
         driver.queueType = 'BOTH';
@@ -542,7 +544,7 @@ export class IvrService {
           { action: 'SAY_LOGGED_IN' },
           Msg.USER_LOGIN,
         );
-      } else if (dto.dtmfInput === '2' && driver.isLoggedIn) {
+      } else if (dto.dtmfInput === '2') {
         driver.isLoggedIn = false;
         driver.isAvailable = false;
         driver.loginLogout = 'STOP';
