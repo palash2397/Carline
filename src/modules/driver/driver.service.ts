@@ -336,6 +336,17 @@ export class DriverService {
         updateData.batch = Number(dto.batch);
       }
 
+      if (dto.assignQueue) {
+        const norm = dto.assignQueue.toUpperCase().trim();
+        if (norm === 'LOCAL' || norm === 'LOCAL_RIDES') {
+          updateData.queueType = 'LOCAL';
+        } else if (norm === 'LONG_DISTANCE' || norm === 'LONG_DISTANCE_RIDE') {
+          updateData.queueType = 'LONG_DISTANCE';
+        } else if (norm === 'BOTH' || norm === 'ALL_RIDES' || norm === 'ALL') {
+          updateData.queueType = 'BOTH';
+        }
+      }
+
       if (
         updateData.status === 'Block' ||
         updateData.status === 'INACTIVE'

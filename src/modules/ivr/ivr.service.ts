@@ -547,6 +547,7 @@ export class IvrService {
         driver.isLoggedIn = true;
         driver.isAvailable = true;
         driver.queueType = 'LOCAL';
+        driver.assignQueue = 'Local_Rides';
         driver.loginLogout = 'START';
         await driver.save();
         return new ApiResponse(
@@ -558,6 +559,7 @@ export class IvrService {
         driver.isLoggedIn = true;
         driver.isAvailable = true;
         driver.queueType = 'LONG_DISTANCE';
+        driver.assignQueue = 'Long_Distance_Ride';
         driver.loginLogout = 'START';
         await driver.save();
         return new ApiResponse(
@@ -569,6 +571,7 @@ export class IvrService {
         driver.isLoggedIn = true;
         driver.isAvailable = true;
         driver.queueType = 'BOTH';
+        driver.assignQueue = 'BOTH';
         driver.loginLogout = 'START';
         await driver.save();
         return new ApiResponse(
