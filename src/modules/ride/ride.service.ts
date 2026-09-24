@@ -62,6 +62,34 @@ export class RideService {
     }
   }
 
+  private normalizeQueueName(queue?: string): string {
+    if (!queue) return 'BOTH';
+    const normalized = queue.trim().toUpperCase();
+    if (
+      normalized === '1' ||
+      normalized === 'LOCAL' ||
+      normalized === 'LOCAL_RIDES'
+    ) {
+      return 'LOCAL';
+    }
+    if (
+      normalized === '2' ||
+      normalized === 'LONG_DISTANCE' ||
+      normalized === 'LONG_DISTANCE_RIDE'
+    ) {
+      return 'LONG_DISTANCE';
+    }
+    if (
+      normalized === '3' ||
+      normalized === 'BOTH' ||
+      normalized === 'ALL' ||
+      normalized === 'ALL_RIDES'
+    ) {
+      return 'BOTH';
+    }
+    return queue;
+  }
+
   async bookIvrRide(dto: BookIvrRideDto) {
     try {
       const customer = await this.customerService.findOrCreateCustomer(
@@ -85,12 +113,13 @@ export class RideService {
       }
 
       const initialStatus = driverData ? RideStatus.ACCEPTED : RideStatus.PENDING;
+      const queueName = this.normalizeQueueName(dto.queueName);
 
       const newRide = new this.rideModel({
         rideId: newRideId,
         customerNumber: dto.customerNumber,
         customerName: customer.fullName,
-        queueName: dto.queueName,
+        queueName: queueName,
         driverName: driverData ? driverData.driverName : '',
         driverNumber: dto.driverNumber || '',
         driverId: driverData ? driverData._id.toString() : '',
@@ -127,12 +156,13 @@ export class RideService {
       const tripNumber = `TRIP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
       const lastRide = await this.rideModel.findOne().sort({ rideId: -1 });
       const newRideId = lastRide && lastRide.rideId ? lastRide.rideId + 1 : 1;
+      const queueName = this.normalizeQueueName(dto.queueName);
 
       const newRide = new this.rideModel({
         rideId: newRideId,
         customerNumber: dto.customerNumber,
         customerName: customer.fullName,
-        queueName: dto.queueName,
+        queueName: queueName,
         rideStatus: 'PENDING',
         tripNumber: tripNumber,
         payment: null,
@@ -142,11 +172,32 @@ export class RideService {
 
       await newRide.save();
 
-      const eligibleDrivers = await this.driverModel.find({
+      const driverQuery: any = {
         isLoggedIn: true,
         isAvailable: true,
-        queueType: { $in: [dto.queueName, 'BOTH'] },
-      });
+        status: { $nin: ['Block', 'INACTIVE'] },
+      };
+
+      if (queueName === 'LOCAL') {
+        driverQuery.$or = [
+          { queueType: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+          { assignQueue: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+        ];
+      } else if (queueName === 'LONG_DISTANCE') {
+        driverQuery.$or = [
+          { queueType: { $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'] } },
+          { assignQueue: { $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'] } },
+        ];
+      } else if (queueName === 'BOTH') {
+        // Press 3 = BOTH: all available logged-in drivers are eligible
+      } else {
+        driverQuery.$or = [
+          { queueType: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
+          { assignQueue: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
+        ];
+      }
+
+      const eligibleDrivers = await this.driverModel.find(driverQuery);
 
       const batch1 = eligibleDrivers
         .filter((d) => d.batch === 1)

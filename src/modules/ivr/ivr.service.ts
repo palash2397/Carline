@@ -554,6 +554,17 @@ export class IvrService {
           { action: 'SAY_LOGGED_OUT' },
           Msg.USER_LOGGED_OUT,
         );
+      } else if (dto.dtmfInput === '3') {
+        driver.isLoggedIn = true;
+        driver.isAvailable = true;
+        driver.queueType = 'BOTH';
+        driver.loginLogout = 'START';
+        await driver.save();
+        return new ApiResponse(
+          200,
+          { action: 'SAY_LOGGED_IN', queueType: 'BOTH' },
+          Msg.USER_LOGIN,
+        );
       }
     }
 
@@ -885,7 +896,46 @@ export class IvrService {
       };
 
       if (queueType) {
-        query.queueType = { $in: [queueType, 'BOTH'] };
+        const normalized = queueType.toUpperCase().trim();
+        if (
+          normalized === '1' ||
+          normalized === 'LOCAL' ||
+          normalized === 'LOCAL_RIDES'
+        ) {
+          query.$or = [
+            { queueType: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+            { assignQueue: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+          ];
+        } else if (
+          normalized === '2' ||
+          normalized === 'LONG_DISTANCE' ||
+          normalized === 'LONG_DISTANCE_RIDE'
+        ) {
+          query.$or = [
+            {
+              queueType: {
+                $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'],
+              },
+            },
+            {
+              assignQueue: {
+                $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'],
+              },
+            },
+          ];
+        } else if (
+          normalized === '3' ||
+          normalized === 'BOTH' ||
+          normalized === 'ALL' ||
+          normalized === 'ALL_RIDES'
+        ) {
+          // Press 3 = BOTH: all available logged-in drivers are returned across all batches
+        } else {
+          query.$or = [
+            { queueType: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+            { assignQueue: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+          ];
+        }
       }
 
       const eligibleDrivers = await this.driverModel.find(query);
