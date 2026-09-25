@@ -129,10 +129,27 @@ export class IvrService {
 
           if (chargeResponse && chargeResponse.statusCode === 200) {
             ride.paymentStatus = PaymentStatus.COMPLETED;
+            ride.rideStatus = RideStatus.COMPLETED;
             ride.ridePaymentDateTime = new Date().toISOString();
+            ride.paymentTransactionId =
+              chargeResponse.data?.transactionId || '';
+            ride.paymentAuthCode = chargeResponse.data?.authCode || '';
             paymentResult = chargeResponse.data;
+
+            // Credit driver upon successful card payment
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            driver.lastTripTaken = new Date();
+            driver.earningsWithoutCash =
+              (driver.earningsWithoutCash || 0) + (ride.rideAmount || 0);
+            driver.totalEarnings =
+              (driver.earningsWithCash || 0) +
+              (driver.earningsWithoutCash || 0);
+            await driver.save();
           } else {
             ride.paymentStatus = PaymentStatus.FAILED;
+            ride.rideStatus = RideStatus.PAYMENT_PENDING;
             paymentResult = chargeResponse?.data;
           }
         } catch (payErr) {
@@ -140,6 +157,8 @@ export class IvrService {
             'Error while charging card via payment service in IVR:',
             payErr,
           );
+          ride.paymentStatus = PaymentStatus.FAILED;
+          ride.rideStatus = RideStatus.PAYMENT_PENDING;
         }
       } else {
         if (ride.paymentStatus !== PaymentStatus.COMPLETED) {
@@ -155,9 +174,15 @@ export class IvrService {
 
       await ride.save();
 
+      const isApproved = ride.paymentStatus === PaymentStatus.COMPLETED;
+
       return new ApiResponse(
         200,
         {
+          action: isApproved
+            ? 'SAY_PAYMENT_CARD_SUCCESS'
+            : 'SAY_PAYMENT_FAILED',
+          menu: isApproved ? undefined : 'PAYMENT_OPTIONS',
           tripNumber: ride.tripNumber,
           driver: {
             _id: driver._id,
@@ -175,6 +200,7 @@ export class IvrService {
             payment: ride.payment,
             paymentType: ride.paymentType,
             paymentStatus: ride.paymentStatus,
+            rideStatus: ride.rideStatus,
             cardMasked: ride.cardMasked,
             last4: ride.cardLast4,
           },
@@ -200,7 +226,9 @@ export class IvrService {
             : null,
           paymentResult,
         },
-        Msg.DRIVER_CARD_PROCESSED,
+        isApproved
+          ? Msg.RIDE_COMPLETED
+          : 'Payment declined or invalid card. Please select another payment method.',
       );
     } catch (error) {
       console.log('Error while processing driver card in IVR:', error);
@@ -417,9 +445,10 @@ export class IvrService {
           }
 
           if (dto.dtmfInput === '1') {
-            activeRide.paymentType = 'CASH';
-            activeRide.paymentStatus = 'COMPLETED';
+            activeRide.paymentType = PaymentType.CASH;
+            activeRide.paymentStatus = PaymentStatus.COMPLETED;
             activeRide.rideStatus = RideStatus.COMPLETED;
+            activeRide.ridePaymentDateTime = new Date().toISOString();
 
             driver.activeRideId = '';
             driver.isAvailable = true;
@@ -443,55 +472,130 @@ export class IvrService {
               Msg.RIDE_COMPLETED,
             );
           } else if (dto.dtmfInput === '2') {
-            activeRide.paymentType = 'CREDIT_CARD';
-            activeRide.paymentStatus = 'COMPLETED';
-            activeRide.rideStatus = RideStatus.COMPLETED;
-
-            driver.activeRideId = '';
-            driver.isAvailable = true;
-            driver.ongoingRides = 'NO';
-            driver.lastTripTaken = new Date();
-            driver.earningsWithoutCash =
-              (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings =
-              (driver.earningsWithCash || 0) +
-              (driver.earningsWithoutCash || 0);
-
+            activeRide.paymentType = PaymentType.CREDIT_CARD;
             await activeRide.save();
-            await driver.save();
             return new ApiResponse(
               200,
-              { action: 'SAY_PAYMENT_CARD_SUCCESS' },
-              Msg.RIDE_COMPLETED,
+              {
+                action: 'PROMPT_CARD_DETAILS',
+                menu: 'CARD_ENTRY',
+                tripNumber: activeRide.tripNumber,
+                calculatedFare: activeRide.rideAmount,
+                currency: 'USD',
+              },
+              'Please enter credit card information to process payment.',
             );
           } else if (dto.dtmfInput === '3') {
-            activeRide.paymentType = PaymentType.SAVED_CARD;
+            const customerPhone = activeRide.customerNumber || '';
+            const customer = customerPhone
+              ? await this.findCustomerByPhoneNumber(customerPhone)
+              : null;
+            const fareAmount = activeRide.rideAmount || 0;
 
-            // Trigger USAePay charge via customer account / saved card
-            await this.paymentService.chargeRideVault({
+            // Step 1: Check if customer has sufficient prepaid account balance
+            if (
+              customer &&
+              (customer.credit || 0) >= fareAmount &&
+              fareAmount > 0
+            ) {
+              customer.credit = Number(
+                ((customer.credit || 0) - fareAmount).toFixed(2),
+              );
+              await customer.save();
+
+              activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+              activeRide.paymentStatus = PaymentStatus.COMPLETED;
+              activeRide.rideStatus = RideStatus.COMPLETED;
+              activeRide.ridePaymentDateTime = new Date().toISOString();
+
+              driver.activeRideId = '';
+              driver.isAvailable = true;
+              driver.ongoingRides = 'NO';
+              driver.lastTripTaken = new Date();
+              driver.earningsWithoutCash =
+                (driver.earningsWithoutCash || 0) + fareAmount;
+              driver.totalEarnings =
+                (driver.earningsWithCash || 0) +
+                (driver.earningsWithoutCash || 0);
+
+              await activeRide.save();
+              await driver.save();
+
+              await this.paymentService.logAccountBalancePayment(
+                activeRide,
+                fareAmount,
+                customer.credit,
+              );
+
+              return new ApiResponse(
+                200,
+                {
+                  action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
+                  remainingBalance: customer.credit,
+                },
+                Msg.RIDE_COMPLETED,
+              );
+            }
+
+            // Step 2: If insufficient prepaid balance, attempt charging card on file via USAePay vault
+            const vaultResult = await this.paymentService.chargeRideVault({
               tripNumber: activeRide.tripNumber,
-              amount: activeRide.rideAmount,
+              amount: fareAmount,
+              customerId: customer?.usaepayCustomerId,
             });
 
-            activeRide.paymentStatus = 'COMPLETED';
-            activeRide.rideStatus = RideStatus.COMPLETED;
+            if (
+              vaultResult &&
+              vaultResult.statusCode === 200 &&
+              (vaultResult.data?.status === 'Approved' ||
+                vaultResult.data?.alreadyPaid)
+            ) {
+              activeRide.paymentType = PaymentType.SAVED_CARD;
+              activeRide.paymentStatus = PaymentStatus.COMPLETED;
+              activeRide.rideStatus = RideStatus.COMPLETED;
+              activeRide.ridePaymentDateTime =
+                activeRide.ridePaymentDateTime || new Date().toISOString();
 
-            driver.activeRideId = '';
-            driver.isAvailable = true;
-            driver.ongoingRides = 'NO';
-            driver.lastTripTaken = new Date();
-            driver.earningsWithoutCash =
-              (driver.earningsWithoutCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings =
-              (driver.earningsWithCash || 0) +
-              (driver.earningsWithoutCash || 0);
+              driver.activeRideId = '';
+              driver.isAvailable = true;
+              driver.ongoingRides = 'NO';
+              driver.lastTripTaken = new Date();
+              driver.earningsWithoutCash =
+                (driver.earningsWithoutCash || 0) + fareAmount;
+              driver.totalEarnings =
+                (driver.earningsWithCash || 0) +
+                (driver.earningsWithoutCash || 0);
 
+              await activeRide.save();
+              await driver.save();
+
+              return new ApiResponse(
+                200,
+                { action: 'SAY_PAYMENT_ACCOUNT_SUCCESS' },
+                Msg.RIDE_COMPLETED,
+              );
+            }
+
+            // Step 3: Neither prepaid balance nor card on file succeeded!
+            // CRITICAL: DO NOT credit driver, DO NOT mark ride COMPLETED!
+            activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+            activeRide.paymentStatus = PaymentStatus.FAILED;
+            // Ride remains in RideStatus.PAYMENT_PENDING
             await activeRide.save();
-            await driver.save();
+
             return new ApiResponse(
               200,
-              { action: 'SAY_PAYMENT_ACCOUNT_SUCCESS' },
-              Msg.RIDE_COMPLETED,
+              {
+                action: 'SAY_PAYMENT_FAILED',
+                menu: 'PAYMENT_OPTIONS',
+                calculatedFare: activeRide.rideAmount,
+                fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                currency: 'USD',
+                error:
+                  vaultResult?.message ||
+                  'No valid card on file or insufficient account balance',
+              },
+              'Customer account payment failed. No card on file or insufficient prepaid balance. Please select another payment option.',
             );
           } else if (dto.dtmfInput === '4') {
             activeRide.paymentType = 'OVERRIDE';

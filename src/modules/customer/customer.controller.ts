@@ -79,4 +79,14 @@ export class CustomerController {
   async deleteCustomerRest(@Param('id') id: string) {
     return this.customerService.deleteCustomer(id);
   }
+
+  @Post('/:id/add-credit')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiOperation({ summary: 'Add prepaid account credit to a customer' })
+  async addCustomerCredit(
+    @Param('id') id: string,
+    @Body('amount') amount: number,
+  ) {
+    return this.customerService.addCredit(id, amount);
+  }
 }

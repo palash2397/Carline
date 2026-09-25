@@ -185,4 +185,36 @@ export class CustomerService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async addCredit(id: string, amount: number) {
+    try {
+      const numAmount = Number(amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        return new ApiResponse(400, {}, 'Amount must be a positive number');
+      }
+
+      const customer = await this.customerModel.findById(id);
+      if (!customer) {
+        return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
+      }
+
+      customer.credit = Number(((customer.credit || 0) + numAmount).toFixed(2));
+      await customer.save();
+
+      return new ApiResponse(
+        200,
+        {
+          _id: customer._id,
+          customerId: customer.customerId,
+          fullName: customer.fullName,
+          mobileNumber: customer.mobileNumber,
+          credit: customer.credit,
+        },
+        'Customer credit added successfully',
+      );
+    } catch (error) {
+      console.log(`Error while adding customer credit:`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
 }

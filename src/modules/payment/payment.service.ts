@@ -255,18 +255,40 @@ export class PaymentService {
           ? { tripNumber: dto.tripNumber }
           : { _id: dto.rideId };
 
-        await this.rideModel.updateOne(query, {
-          $set: {
-            paymentType: PaymentType.CREDIT_CARD,
-            paymentStatus: isApproved
-              ? PaymentStatus.COMPLETED
-              : PaymentStatus.FAILED,
-            paymentTransactionId: resData.refnum || resData.key || '',
-            paymentAuthCode: resData.authcode || '',
-            paymentGatewayResponse: resData,
-            ridePaymentDateTime: new Date().toISOString(),
-          },
-        });
+        const ride = await this.rideModel.findOne(query);
+        if (ride) {
+          ride.paymentType = PaymentType.CREDIT_CARD;
+          ride.paymentStatus = isApproved
+            ? PaymentStatus.COMPLETED
+            : PaymentStatus.FAILED;
+          ride.paymentTransactionId = resData.refnum || resData.key || '';
+          ride.paymentAuthCode = resData.authcode || resData.auth_code || '';
+          ride.paymentGatewayResponse = resData;
+          ride.ridePaymentDateTime = new Date().toISOString();
+
+          if (isApproved) {
+            ride.rideStatus = RideStatus.COMPLETED;
+            ride.rideCompleteDateTime =
+              ride.rideCompleteDateTime || new Date().toISOString();
+
+            // Find and credit the driver upon successful payment
+            const driver = await this.findLinkedDriver(ride);
+            if (driver) {
+              driver.activeRideId = '';
+              driver.isAvailable = true;
+              driver.ongoingRides = 'NO';
+              driver.lastTripTaken = new Date();
+              driver.earningsWithoutCash =
+                (driver.earningsWithoutCash || 0) +
+                (ride.rideAmount || dto.amount || 0);
+              driver.totalEarnings =
+                (driver.earningsWithCash || 0) +
+                (driver.earningsWithoutCash || 0);
+              await driver.save();
+            }
+          }
+          await ride.save();
+        }
       }
 
       if (!isApproved) {
@@ -806,6 +828,34 @@ export class PaymentService {
       await log.save();
     } catch (err: any) {
       this.logger.error(`Failed to save cash payment log: ${err?.message}`);
+    }
+  }
+
+  async logAccountBalancePayment(
+    ride: RideDocument,
+    amount: number,
+    remainingBalance: number,
+  ) {
+    try {
+      const log = new this.paymentLogModel({
+        rideId: ride._id ? ride._id.toString() : '',
+        tripNumber: ride.tripNumber || '',
+        customerNumber: ride.customerNumber || '',
+        amount: amount || ride.rideAmount || 0,
+        currency: 'USD',
+        paymentType: PaymentType.CUSTOMER_ACCOUNT,
+        status: PaymentStatus.COMPLETED,
+        errorMessage: '',
+        gatewayResponse: {
+          note: 'Paid via customer prepaid account balance',
+          remainingBalance,
+        },
+      });
+      await log.save();
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to save account balance payment log: ${err?.message}`,
+      );
     }
   }
 }
