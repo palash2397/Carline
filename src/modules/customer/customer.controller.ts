@@ -24,6 +24,7 @@ import { UserRole } from 'src/common/enums/user/role.enum';
 import { JwtAuthGuard } from '../auth/jwt/jwt-auth.guard';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { FundCustomerDto } from './dto/fund-customer.dto';
 
 @ApiBearerAuth('access-token')
 @UseGuards(JwtAuthGuard, RoleGuard)
@@ -80,22 +81,15 @@ export class CustomerController {
     return this.customerService.deleteCustomer(id);
   }
 
-  @Post('/:id/add-credit')
+  @Post('/add-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  async addCustomerCredit(
-    @Param('id') id: string,
-    @Body('amount') amount: number,
-    @Body('fundFromCard') fundFromCard?: boolean,
-  ) {
-    return this.customerService.addCredit(id, amount, fundFromCard);
+  async addCustomerCredit(@Body() fundCustomerDto: FundCustomerDto) {
+    return this.customerService.addCredit(fundCustomerDto);
   }
 
-  @Post('/:id/fund-credit')
+  @Post('/fund-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  async fundCustomerCreditFromCard(
-    @Param('id') id: string,
-    @Body('amount') amount: number,
-  ) {
-    return this.customerService.fundCreditFromCard(id, amount);
+  async fundCustomerCreditFromCard(@Body() fundCustomerDto: FundCustomerDto) {
+    return this.customerService.fundCreditFromCard(fundCustomerDto);
   }
 }

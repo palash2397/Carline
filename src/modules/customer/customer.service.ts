@@ -8,6 +8,8 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { PaymentService } from '../payment/payment.service';
 
+import { FundCustomerDto } from './dto/fund-customer.dto';
+
 import { UserRole } from 'src/common/enums/user/role.enum';
 
 @Injectable()
@@ -189,17 +191,26 @@ export class CustomerService {
     }
   }
 
-  async addCredit(id: string, amount: number, fundFromCard?: boolean) {
-    if (fundFromCard) {
-      return this.fundCreditFromCard(id, amount);
-    }
+  async addCredit(dto: FundCustomerDto) {
     try {
-      const numAmount = Number(amount);
+      const numAmount = Number(dto.amount);
       if (isNaN(numAmount) || numAmount <= 0) {
         return new ApiResponse(400, {}, 'Amount must be a positive number');
       }
 
-      const customer = await this.customerModel.findById(id);
+      let customer = isValidObjectId(dto.id)
+        ? await this.customerModel.findById(dto.id)
+        : null;
+
+      if (!customer) {
+        customer = await this.customerModel.findOne({
+          $or: [
+            { customerId: Number(dto.id) || 0 },
+            { mobileNumber: dto.id },
+          ],
+        });
+      }
+
       if (!customer) {
         return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
       }
@@ -224,10 +235,10 @@ export class CustomerService {
     }
   }
 
-  async fundCreditFromCard(id: string, amount: number) {
+  async fundCreditFromCard(dto: FundCustomerDto) {
     return this.paymentService.fundCustomerCreditFromVault({
-      customerId: id,
-      amount,
+      customerId: dto.id,
+      amount: dto.amount,
     });
   }
 }

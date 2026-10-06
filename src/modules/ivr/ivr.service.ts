@@ -304,6 +304,25 @@ export class IvrService {
       dto.action === 'TRIP_CANCEL';
 
     if (isCancelAction) {
+      if (
+        activeRide &&
+        (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
+          activeRide.paymentStatus === 'COMPLETED' ||
+          activeRide.rideStatus === RideStatus.COMPLETED ||
+          activeRide.rideStatus === 'COMPLETED')
+      ) {
+        return new ApiResponse(
+          400,
+          {
+            action: 'SAY_CANNOT_CANCEL',
+            tripNumber: activeRide.tripNumber,
+            rideStatus: activeRide.rideStatus,
+            paymentStatus: activeRide.paymentStatus,
+          },
+          'Payment has already been completed for this trip. It cannot be cancelled.',
+        );
+      }
+
       if (activeRide) {
         activeRide.rideStatus = RideStatus.CANCELLED;
         await activeRide.save();
@@ -312,6 +331,7 @@ export class IvrService {
 
       driver.activeRideId = '';
       driver.isAvailable = true;
+      driver.ongoingRides = 'NO';
       await driver.save();
 
       return new ApiResponse(
@@ -394,6 +414,27 @@ export class IvrService {
           );
         } else if (
           activeRide.rideStatus === RideStatus.STARTED &&
+          (dto.dtmfInput === '3' || dto.dtmfInput === '9')
+        ) {
+          activeRide.rideStatus = RideStatus.CANCELLED;
+          await activeRide.save();
+          await this.cancelOtherCalls(activeRide.tripNumber);
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
+          await driver.save();
+          return new ApiResponse(
+            200,
+            {
+              action: 'TRIP_CANCELLED',
+              tripNumber: activeRide.tripNumber,
+              workflowStage: 'CANCELLED',
+              rideStatus: 'CANCELLED',
+            },
+            'Trip cancelled successfully before payment',
+          );
+        } else if (
+          activeRide.rideStatus === RideStatus.STARTED &&
           dto.dtmfInput === '2'
         ) {
           activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
@@ -439,7 +480,7 @@ export class IvrService {
                 selectedZone: fareDetails.zone,
                 currency: fareDetails.currency,
               },
-              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account, 4 for Override Amount, 0 to Go Back.`,
+              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account, 4 for Override Amount, 9 to Cancel Trip, 0 to Go Back.`,
             );
           }
 
@@ -639,6 +680,24 @@ export class IvrService {
               200,
               { action: 'PROMPT_OVERRIDE_AMOUNT' },
               'Prompt driver for custom override amount',
+            );
+          } else if (dto.dtmfInput === '9') {
+            activeRide.rideStatus = RideStatus.CANCELLED;
+            await activeRide.save();
+            await this.cancelOtherCalls(activeRide.tripNumber);
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            await driver.save();
+            return new ApiResponse(
+              200,
+              {
+                action: 'TRIP_CANCELLED',
+                tripNumber: activeRide.tripNumber,
+                workflowStage: 'CANCELLED',
+                rideStatus: 'CANCELLED',
+              },
+              'Trip cancelled successfully before payment',
             );
           } else if (dto.dtmfInput === '0') {
             return new ApiResponse(
