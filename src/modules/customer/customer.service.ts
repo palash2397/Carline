@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
 import { Customer, CustomerDocument } from './schema/customer.schema';
@@ -6,6 +6,7 @@ import { ApiResponse } from '../../helpers/ApiResponse';
 import { Msg } from 'src/helpers/responseMsg';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { PaymentService } from '../payment/payment.service';
 
 import { UserRole } from 'src/common/enums/user/role.enum';
 
@@ -13,6 +14,8 @@ import { UserRole } from 'src/common/enums/user/role.enum';
 export class CustomerService {
   constructor(
     @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
+    @Inject(forwardRef(() => PaymentService))
+    private paymentService: PaymentService,
   ) {}
 
   async getCustomers(query: any) {
@@ -186,7 +189,10 @@ export class CustomerService {
     }
   }
 
-  async addCredit(id: string, amount: number) {
+  async addCredit(id: string, amount: number, fundFromCard?: boolean) {
+    if (fundFromCard) {
+      return this.fundCreditFromCard(id, amount);
+    }
     try {
       const numAmount = Number(amount);
       if (isNaN(numAmount) || numAmount <= 0) {
@@ -216,5 +222,12 @@ export class CustomerService {
       console.log(`Error while adding customer credit:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
+  }
+
+  async fundCreditFromCard(id: string, amount: number) {
+    return this.paymentService.fundCustomerCreditFromVault({
+      customerId: id,
+      amount,
+    });
   }
 }

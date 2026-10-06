@@ -161,9 +161,8 @@ export class IvrService {
           ride.rideStatus = RideStatus.PAYMENT_PENDING;
         }
       } else {
-        if (ride.paymentStatus !== PaymentStatus.COMPLETED) {
-          ride.paymentStatus = PaymentStatus.PENDING;
-        }
+        ride.paymentStatus = PaymentStatus.FAILED;
+        ride.rideStatus = RideStatus.PAYMENT_PENDING;
       }
 
       if (customer) {
@@ -492,12 +491,27 @@ export class IvrService {
               : null;
             const fareAmount = activeRide.rideAmount || 0;
 
-            // Step 1: Check if customer has sufficient prepaid account balance
-            if (
-              customer &&
-              (customer.credit || 0) >= fareAmount &&
-              fareAmount > 0
-            ) {
+            if (!customer) {
+              activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+              activeRide.paymentStatus = PaymentStatus.FAILED;
+              await activeRide.save();
+
+              return new ApiResponse(
+                200,
+                {
+                  action: 'SAY_PAYMENT_FAILED',
+                  menu: 'PAYMENT_OPTIONS',
+                  calculatedFare: activeRide.rideAmount,
+                  fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                  currency: 'USD',
+                  error: 'Customer account not found for this phone number.',
+                },
+                'No customer account found for this phone number. Please select another payment option.',
+              );
+            }
+
+            // Step 1: Check if customer has enough prepaid money/balance on account
+            if ((customer.credit || 0) >= fareAmount && fareAmount > 0) {
               customer.credit = Number(
                 ((customer.credit || 0) - fareAmount).toFixed(2),
               );
@@ -532,55 +546,77 @@ export class IvrService {
                 {
                   action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
                   remainingBalance: customer.credit,
+                  paidVia: 'PREPAID_BALANCE',
                 },
-                Msg.RIDE_COMPLETED,
+                `Payment accepted via customer account balance. Remaining balance: $${customer.credit}.`,
               );
             }
 
-            // Step 2: If insufficient prepaid balance, attempt charging card on file via USAePay vault
-            const vaultResult = await this.paymentService.chargeRideVault({
-              tripNumber: activeRide.tripNumber,
-              amount: fareAmount,
-              customerId: customer?.usaepayCustomerId,
-            });
+            // Step 2: If insufficient prepaid balance, check if customer has a valid credit card linked/on file
+            if (customer.usaepayCustomerId) {
+              const vaultResult = await this.paymentService.chargeRideVault({
+                tripNumber: activeRide.tripNumber,
+                amount: fareAmount,
+                customerId: customer.usaepayCustomerId,
+              });
 
-            if (
-              vaultResult &&
-              vaultResult.statusCode === 200 &&
-              (vaultResult.data?.status === 'Approved' ||
-                vaultResult.data?.alreadyPaid)
-            ) {
-              activeRide.paymentType = PaymentType.SAVED_CARD;
-              activeRide.paymentStatus = PaymentStatus.COMPLETED;
-              activeRide.rideStatus = RideStatus.COMPLETED;
-              activeRide.ridePaymentDateTime =
-                activeRide.ridePaymentDateTime || new Date().toISOString();
+              if (
+                vaultResult &&
+                vaultResult.statusCode === 200 &&
+                (vaultResult.data?.status === 'Approved' ||
+                  vaultResult.data?.alreadyPaid)
+              ) {
+                activeRide.paymentType = PaymentType.SAVED_CARD;
+                activeRide.paymentStatus = PaymentStatus.COMPLETED;
+                activeRide.rideStatus = RideStatus.COMPLETED;
+                activeRide.ridePaymentDateTime =
+                  activeRide.ridePaymentDateTime || new Date().toISOString();
 
-              driver.activeRideId = '';
-              driver.isAvailable = true;
-              driver.ongoingRides = 'NO';
-              driver.lastTripTaken = new Date();
-              driver.earningsWithoutCash =
-                (driver.earningsWithoutCash || 0) + fareAmount;
-              driver.totalEarnings =
-                (driver.earningsWithCash || 0) +
-                (driver.earningsWithoutCash || 0);
+                driver.activeRideId = '';
+                driver.isAvailable = true;
+                driver.ongoingRides = 'NO';
+                driver.lastTripTaken = new Date();
+                driver.earningsWithoutCash =
+                  (driver.earningsWithoutCash || 0) + fareAmount;
+                driver.totalEarnings =
+                  (driver.earningsWithCash || 0) +
+                  (driver.earningsWithoutCash || 0);
 
+                await activeRide.save();
+                await driver.save();
+
+                return new ApiResponse(
+                  200,
+                  {
+                    action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
+                    paidVia: 'CARD_ON_FILE',
+                  },
+                  'Payment accepted and charged to card on file.',
+                );
+              }
+
+              // Card on file was declined by gateway
+              activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+              activeRide.paymentStatus = PaymentStatus.FAILED;
               await activeRide.save();
-              await driver.save();
 
               return new ApiResponse(
                 200,
-                { action: 'SAY_PAYMENT_ACCOUNT_SUCCESS' },
-                Msg.RIDE_COMPLETED,
+                {
+                  action: 'SAY_PAYMENT_FAILED',
+                  menu: 'PAYMENT_OPTIONS',
+                  calculatedFare: activeRide.rideAmount,
+                  fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                  currency: 'USD',
+                  error: vaultResult?.message || 'Card on file was declined',
+                },
+                'Card on file was declined by the payment gateway. Please choose another payment method.',
               );
             }
 
-            // Step 3: Neither prepaid balance nor card on file succeeded!
-            // CRITICAL: DO NOT credit driver, DO NOT mark ride COMPLETED!
+            // Step 3: Neither prepaid balance nor a card on file is available
             activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
             activeRide.paymentStatus = PaymentStatus.FAILED;
-            // Ride remains in RideStatus.PAYMENT_PENDING
             await activeRide.save();
 
             return new ApiResponse(
@@ -592,10 +628,9 @@ export class IvrService {
                 fareOverrideApplied: !!activeRide.fareOverrideApplied,
                 currency: 'USD',
                 error:
-                  vaultResult?.message ||
-                  'No valid card on file or insufficient account balance',
+                  'Customer does not have a linked credit card or sufficient account balance.',
               },
-              'Customer account payment failed. No card on file or insufficient prepaid balance. Please select another payment option.',
+              'Account payment failed. Customer does not have a valid credit card on file or sufficient account balance. Please select another payment option.',
             );
           } else if (dto.dtmfInput === '4') {
             activeRide.paymentType = 'OVERRIDE';

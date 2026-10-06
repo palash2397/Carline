@@ -82,11 +82,20 @@ export class CustomerController {
 
   @Post('/:id/add-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Add prepaid account credit to a customer' })
   async addCustomerCredit(
     @Param('id') id: string,
     @Body('amount') amount: number,
+    @Body('fundFromCard') fundFromCard?: boolean,
   ) {
-    return this.customerService.addCredit(id, amount);
+    return this.customerService.addCredit(id, amount, fundFromCard);
+  }
+
+  @Post('/:id/fund-credit')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async fundCustomerCreditFromCard(
+    @Param('id') id: string,
+    @Body('amount') amount: number,
+  ) {
+    return this.customerService.fundCreditFromCard(id, amount);
   }
 }

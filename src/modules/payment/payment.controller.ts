@@ -69,6 +69,16 @@ export class PaymentController {
     return this.paymentService.getCustomerCardDetails(customerNumber);
   }
 
+  @Post('/fund-customer-credit')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RoleGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  async fundCustomerCreditFromVault(
+    @Body() dto: { customerId: string; amount: number },
+  ) {
+    return this.paymentService.fundCustomerCreditFromVault(dto);
+  }
+
   @Post('/refund')
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard, RoleGuard)

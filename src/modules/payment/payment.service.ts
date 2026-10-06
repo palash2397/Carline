@@ -858,5 +858,126 @@ export class PaymentService {
       );
     }
   }
+
+  async fundCustomerCreditFromVault(dto: {
+    customerId: string;
+    amount: number;
+  }) {
+    try {
+      const numAmount = Number(dto.amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        return new ApiResponse(400, {}, 'Amount must be a positive number');
+      }
+
+      let customer: any = await this.customerModel
+        .findById(dto.customerId)
+        .catch(() => null);
+
+      if (!customer) {
+        customer = await this.customerModel.findOne({
+          $or: [
+            { customerId: Number(dto.customerId) || 0 },
+            { mobileNumber: dto.customerId },
+          ],
+        });
+      }
+
+      if (!customer) {
+        return new ApiResponse(404, {}, Msg.CUSTOMER_NOT_FOUND);
+      }
+
+      if (!customer.usaepayCustomerId) {
+        return new ApiResponse(
+          400,
+          {},
+          'No saved credit card on file for this customer. Please save a card first.',
+        );
+      }
+
+      const apiKey = (process.env.USAEPAY_API_KEY || '').trim();
+      const amountStr = numAmount.toFixed(2);
+      const targetTokenOrId = customer.usaepayCustomerId;
+
+      const payload: any = {
+        command: 'cc:sale',
+        amount: amountStr,
+        invoice: `FUND-${Date.now()}`,
+        description: `Prepaid Account Credit Funding for ${customer.fullName || customer.mobileNumber}`,
+      };
+
+      if (apiKey) {
+        payload.key = apiKey;
+      }
+
+      if (targetTokenOrId.includes('-') || targetTokenOrId.length > 15) {
+        payload.creditcard = { number: targetTokenOrId };
+      } else {
+        payload.customer_id = targetTokenOrId;
+      }
+
+      this.logger.log(
+        `Funding $${amountStr} credit for customer ${customer.mobileNumber} using USAePay vault ID: ${targetTokenOrId}`,
+      );
+
+      const response = await this.executeUSAePayRequest(
+        'transactions',
+        payload,
+      );
+      const resData = response.data;
+      const isApproved =
+        resData &&
+        (resData.status === 'Approved' ||
+          resData.result_code === 'A' ||
+          resData.result === 'Approved');
+
+      const transactionId =
+        resData?.refnum || resData?.key || resData?.id || '';
+      const authCode = resData?.authcode || '';
+
+      const log = new this.paymentLogModel({
+        customerNumber: customer.mobileNumber,
+        amount: numAmount,
+        currency: 'USD',
+        paymentType: PaymentType.SAVED_CARD,
+        status: isApproved ? PaymentStatus.APPROVED : PaymentStatus.DECLINED,
+        transactionId,
+        authCode,
+        gatewayResponse: resData,
+        errorMessage: isApproved ? '' : resData.error || 'Card Funding Declined',
+      });
+      await log.save();
+
+      if (!isApproved) {
+        return new ApiResponse(400, resData, Msg.PAYMENT_DECLINED);
+      }
+
+      customer.credit = Number(((customer.credit || 0) + numAmount).toFixed(2));
+      await customer.save();
+
+      return new ApiResponse(
+        200,
+        {
+          _id: customer._id,
+          customerId: customer.customerId,
+          fullName: customer.fullName,
+          mobileNumber: customer.mobileNumber,
+          credit: customer.credit,
+          amountFunded: numAmount,
+          transactionId,
+          authCode,
+        },
+        'Customer prepaid credit funded successfully from card on file',
+      );
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        Msg.PAYMENT_FAILED;
+
+      this.logger.error(`Error funding customer credit: ${errorMsg}`);
+      return new ApiResponse(500, { error: errorMsg }, Msg.PAYMENT_FAILED);
+    }
+  }
 }
 
