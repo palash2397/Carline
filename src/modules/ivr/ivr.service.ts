@@ -227,7 +227,7 @@ export class IvrService {
         },
         isApproved
           ? Msg.RIDE_COMPLETED
-          : 'Payment declined or invalid card. Please select another payment method.',
+          : Msg.IVR_PAYMENT_DECLINED,
       );
     } catch (error) {
       console.log('Error while processing driver card in IVR:', error);
@@ -259,7 +259,7 @@ export class IvrService {
       return new ApiResponse(
         403,
         { action: 'SAY_ACCOUNT_LOCKED' },
-        'Your driver account is locked out or inactive. Please contact dispatch.',
+        Msg.IVR_DRIVER_ACCOUNT_LOCKED,
       );
     }
 
@@ -319,7 +319,7 @@ export class IvrService {
             rideStatus: activeRide.rideStatus,
             paymentStatus: activeRide.paymentStatus,
           },
-          'Payment has already been completed for this trip. It cannot be cancelled.',
+          Msg.IVR_CANNOT_CANCEL_PAID_TRIP,
         );
       }
 
@@ -342,7 +342,7 @@ export class IvrService {
           workflowStage: 'CANCELLED',
           rideStatus: 'CANCELLED',
         },
-        'Trip cancelled successfully',
+        Msg.IVR_TRIP_CANCELLED,
       );
     }
 
@@ -373,15 +373,19 @@ export class IvrService {
           return new ApiResponse(
             200,
             { menu: 'START_OR_CANCEL' },
-            'Play start/cancel menu',
+            Msg.IVR_PLAY_START_CANCEL_MENU,
           );
         } else if (activeRide.rideStatus === RideStatus.STARTED) {
-          return new ApiResponse(200, { menu: 'FINISH' }, 'Play finish menu');
+          return new ApiResponse(
+            200,
+            { menu: 'FINISH' },
+            Msg.IVR_PLAY_FINISH_MENU,
+          );
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
           return new ApiResponse(
             200,
             { menu: 'PAYMENT_OPTIONS' },
-            'Play payment options menu: 1-Cash, 2-Card, 3-Account, 4-Override',
+            Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU,
           );
         }
       } else {
@@ -431,7 +435,7 @@ export class IvrService {
               workflowStage: 'CANCELLED',
               rideStatus: 'CANCELLED',
             },
-            'Trip cancelled successfully before payment',
+            Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
           );
         } else if (
           activeRide.rideStatus === RideStatus.STARTED &&
@@ -444,7 +448,7 @@ export class IvrService {
           return new ApiResponse(
             200,
             { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
-            'Trip finished. Please select Zone: 1 for Zone 1, 2 for Zone 2, 3 for Zone 3, 4 for Zone 4.',
+            Msg.IVR_PLAY_ZONE_SELECTION_MENU,
           );
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
           // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
@@ -480,7 +484,10 @@ export class IvrService {
                 selectedZone: fareDetails.zone,
                 currency: fareDetails.currency,
               },
-              `Trip duration is ${durationMinutes} minutes. Calculated fare is $${fareDetails.calculatedFare}. Please select payment option: 1 for Cash, 2 for Credit Card, 3 for Customer Account, 4 for Override Amount, 9 to Cancel Trip, 0 to Go Back.`,
+              Msg.IVR_FARE_CALCULATED_PROMPT(
+                durationMinutes,
+                fareDetails.calculatedFare,
+              ),
             );
           }
 
@@ -523,7 +530,7 @@ export class IvrService {
                 calculatedFare: activeRide.rideAmount,
                 currency: 'USD',
               },
-              'Please enter credit card information to process payment.',
+              Msg.IVR_ENTER_CARD_DETAILS,
             );
           } else if (dto.dtmfInput === '3') {
             const customerPhone = activeRide.customerNumber || '';
@@ -547,7 +554,7 @@ export class IvrService {
                   currency: 'USD',
                   error: 'Customer account not found for this phone number.',
                 },
-                'No customer account found for this phone number. Please select another payment option.',
+                Msg.IVR_CUSTOMER_ACCOUNT_NOT_FOUND,
               );
             }
 
@@ -589,7 +596,7 @@ export class IvrService {
                   remainingBalance: customer.credit,
                   paidVia: 'PREPAID_BALANCE',
                 },
-                `Payment accepted via customer account balance. Remaining balance: $${customer.credit}.`,
+                Msg.IVR_ACCOUNT_BALANCE_SUCCESS(customer.credit),
               );
             }
 
@@ -632,7 +639,7 @@ export class IvrService {
                     action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
                     paidVia: 'CARD_ON_FILE',
                   },
-                  'Payment accepted and charged to card on file.',
+                  Msg.IVR_CARD_ON_FILE_PAYMENT_SUCCESS,
                 );
               }
 
@@ -651,7 +658,7 @@ export class IvrService {
                   currency: 'USD',
                   error: vaultResult?.message || 'Card on file was declined',
                 },
-                'Card on file was declined by the payment gateway. Please choose another payment method.',
+                Msg.IVR_CARD_ON_FILE_DECLINED,
               );
             }
 
@@ -671,7 +678,7 @@ export class IvrService {
                 error:
                   'Customer does not have a linked credit card or sufficient account balance.',
               },
-              'Account payment failed. Customer does not have a valid credit card on file or sufficient account balance. Please select another payment option.',
+              Msg.IVR_NO_VALID_CARD_OR_BALANCE,
             );
           } else if (dto.dtmfInput === '4') {
             activeRide.paymentType = 'OVERRIDE';
@@ -679,7 +686,7 @@ export class IvrService {
             return new ApiResponse(
               200,
               { action: 'PROMPT_OVERRIDE_AMOUNT' },
-              'Prompt driver for custom override amount',
+              Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
             );
           } else if (dto.dtmfInput === '9') {
             activeRide.rideStatus = RideStatus.CANCELLED;
@@ -697,7 +704,7 @@ export class IvrService {
                 workflowStage: 'CANCELLED',
                 rideStatus: 'CANCELLED',
               },
-              'Trip cancelled successfully before payment',
+              Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
             );
           } else if (dto.dtmfInput === '0') {
             return new ApiResponse(
@@ -709,7 +716,7 @@ export class IvrService {
                 fareOverrideApplied: !!activeRide.fareOverrideApplied,
                 currency: 'USD',
               },
-              'Returned to payment menu',
+              Msg.IVR_RETURNED_TO_PAYMENT_MENU,
             );
           }
         }
@@ -719,7 +726,7 @@ export class IvrService {
         return new ApiResponse(
           200,
           { menu: 'LOGIN_LOGOUT' },
-          'Play login menu',
+          Msg.IVR_PLAY_LOGIN_MENU,
         );
       }
 
@@ -727,7 +734,7 @@ export class IvrService {
         return new ApiResponse(
           403,
           { action: 'SAY_ACCOUNT_LOCKED' },
-          'Your driver account is locked out or inactive. Please contact dispatch.',
+          Msg.IVR_DRIVER_ACCOUNT_LOCKED,
         );
       }
 
@@ -793,7 +800,7 @@ export class IvrService {
       return new ApiResponse(
         409,
         { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
-        'Driver is not logged in',
+        Msg.IVR_DRIVER_NOT_LOGGED_IN,
       );
     }
 
@@ -815,7 +822,7 @@ export class IvrService {
       return new ApiResponse(
         409,
         { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
-        'Trip is assigned to another driver',
+        Msg.IVR_TRIP_ASSIGNED_TO_OTHER_DRIVER,
       );
     }
 
@@ -853,7 +860,7 @@ export class IvrService {
       return new ApiResponse(
         409,
         { action: 'FARE_OVERRIDE_NOT_ALLOWED' },
-        'Trip zone and fare must be calculated before overriding',
+        Msg.IVR_ZONE_FARE_REQUIRED_FOR_OVERRIDE,
       );
     }
 
@@ -977,7 +984,7 @@ export class IvrService {
       return new ApiResponse(
         403,
         { action: 'SAY_ACCOUNT_LOCKED' },
-        'Your driver account is locked out or inactive. Please contact dispatch.',
+        Msg.IVR_DRIVER_ACCOUNT_LOCKED,
       );
     }
 
@@ -985,7 +992,7 @@ export class IvrService {
       return new ApiResponse(
         400,
         {},
-        'Either dispatchId or tripNumber is required',
+        Msg.IVR_DISPATCH_OR_TRIP_REQUIRED,
       );
     }
 
@@ -1033,7 +1040,7 @@ export class IvrService {
         return new ApiResponse(
           200,
           { action: 'SAY_REPLAY' },
-          'Replay requested',
+          Msg.IVR_REPLAY_REQUESTED,
         );
       }
     }
@@ -1082,7 +1089,7 @@ export class IvrService {
         return new ApiResponse(
           200,
           { action: 'SAY_REPLAY' },
-          'Replay requested',
+          Msg.IVR_REPLAY_REQUESTED,
         );
       }
     }
@@ -1191,7 +1198,7 @@ export class IvrService {
             b3: batch3Drivers.length,
           },
         },
-        'Online batches fetched successfully',
+        Msg.IVR_ONLINE_BATCHES_FETCHED,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
@@ -1227,7 +1234,7 @@ export class IvrService {
             trip: null,
             activeTripData: null,
           },
-          'Driver account is locked out or inactive',
+          Msg.IVR_DRIVER_ACCOUNT_INACTIVE,
         );
       }
 
@@ -1500,7 +1507,7 @@ export class IvrService {
           trip: hasActiveTrip ? activeTripData : completedTripData || null,
           activeTripData: activeTripData || null,
         },
-        'Driver status fetched',
+        Msg.IVR_DRIVER_STATUS_FETCHED,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
@@ -1535,7 +1542,7 @@ export class IvrService {
   async getCustomerStatus(mobileNumber: string) {
     try {
       if (!mobileNumber) {
-        return new ApiResponse(400, {}, 'Mobile number is required');
+        return new ApiResponse(400, {}, Msg.IVR_MOBILE_NUMBER_REQUIRED);
       }
 
       const customer = await this.findCustomerByPhoneNumber(mobileNumber);
@@ -1682,7 +1689,7 @@ export class IvrService {
           trip: tripData,
           driver: driverDetails,
         },
-        'Customer status fetched successfully',
+        Msg.IVR_CUSTOMER_STATUS_FETCHED,
       );
     } catch (error) {
       console.log('Error in getCustomerStatus:', error);

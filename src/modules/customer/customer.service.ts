@@ -195,7 +195,7 @@ export class CustomerService {
     try {
       const numAmount = Number(dto.amount);
       if (isNaN(numAmount) || numAmount <= 0) {
-        return new ApiResponse(400, {}, 'Amount must be a positive number');
+        return new ApiResponse(400, {}, Msg.AMOUNT_POSITIVE_REQUIRED);
       }
 
       let customer = isValidObjectId(dto.id)
@@ -227,7 +227,7 @@ export class CustomerService {
           mobileNumber: customer.mobileNumber,
           credit: customer.credit,
         },
-        'Customer credit added successfully',
+        Msg.CUSTOMER_CREDIT_ADDED,
       );
     } catch (error) {
       console.log(`Error while adding customer credit:`, error);
