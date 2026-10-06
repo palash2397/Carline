@@ -198,17 +198,29 @@ export class CustomerService {
         return new ApiResponse(400, {}, Msg.AMOUNT_POSITIVE_REQUIRED);
       }
 
+      const cleanDigits = String(dto.id).replace(/\D/g, '');
+      const last10 =
+        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
       let customer = isValidObjectId(dto.id)
         ? await this.customerModel.findById(dto.id)
         : null;
 
       if (!customer) {
-        customer = await this.customerModel.findOne({
-          $or: [
-            { customerId: Number(dto.id) || 0 },
-            { mobileNumber: dto.id },
-          ],
-        });
+        const orConditions: any[] = [
+          { customerId: Number(dto.id) || 0 },
+          { mobileNumber: dto.id },
+        ];
+        if (cleanDigits) {
+          orConditions.push({ mobileNumber: cleanDigits });
+        }
+        if (last10) {
+          orConditions.push({ mobileNumber: last10 });
+          orConditions.push({
+            mobileNumber: { $regex: last10, $options: 'i' },
+          });
+        }
+        customer = await this.customerModel.findOne({ $or: orConditions });
       }
 
       if (!customer) {

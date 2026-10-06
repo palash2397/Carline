@@ -445,10 +445,14 @@ export class PaymentService {
         return new ApiResponse(400, {}, Msg.NO_SAVED_CARD);
       }
 
+      payload.creditcard = {
+        number: targetTokenOrId,
+      };
       if (targetTokenOrId.includes('-') || targetTokenOrId.length > 15) {
-        payload.creditcard = { number: targetTokenOrId };
+        payload.cardref = targetTokenOrId;
       } else {
         payload.customer_id = targetTokenOrId;
+        payload.cardref = targetTokenOrId;
       }
 
       const response = await this.executeUSAePayRequest(
@@ -571,8 +575,26 @@ export class PaymentService {
 
   async saveCustomerVaultCard(dto: SaveCardDto) {
     try {
+      const cleanDigits = (dto.customerNumber || '').replace(/\D/g, '');
+      const last10 =
+        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+      const phoneConditions: any[] = [{ mobileNumber: dto.customerNumber }];
+      if (cleanDigits) {
+        phoneConditions.push({ mobileNumber: cleanDigits });
+        phoneConditions.push({
+          mobileNumber: { $regex: cleanDigits, $options: 'i' },
+        });
+      }
+      if (last10 && last10 !== cleanDigits) {
+        phoneConditions.push({ mobileNumber: last10 });
+        phoneConditions.push({
+          mobileNumber: { $regex: last10, $options: 'i' },
+        });
+      }
+
       let customer = await this.customerModel.findOne({
-        mobileNumber: dto.customerNumber,
+        $or: phoneConditions,
       });
 
       if (!customer) {
@@ -621,17 +643,38 @@ export class PaymentService {
       }
 
       const resData = response.data;
+      this.logger.log(
+        `USAePay Token/Save Response: ${JSON.stringify(resData)}`,
+      );
+
+      if (resData?.result_code === 'E' || resData?.result === 'Error') {
+        const errorMsg = resData?.error || 'Card declined or invalid card number';
+        this.logger.error(`USAePay Card Save Rejected: ${errorMsg}`);
+        return new ApiResponse(400, resData, errorMsg);
+      }
+
       const customerId =
-        resData.key ||
-        resData.token ||
         resData.savedcard?.key ||
+        resData.savedcard?.cardref ||
+        resData.cardref ||
+        resData.card_ref ||
+        resData.UMcardRef ||
+        resData.token ||
+        resData.key ||
         resData.savedcard?.token ||
+        resData.creditcard?.cardref ||
         resData.refnum ||
         resData.custnum ||
+        resData.custkey ||
         resData.id;
 
       const last4 = cleanCard ? cleanCard.slice(-4) : '****';
-      let cardType = resData.savedcard?.type;
+      let cardType =
+        resData.card_type ||
+        resData.cardtype ||
+        resData.savedcard?.type ||
+        resData.creditcard?.type;
+
       if (!cardType) {
         if (/^4/.test(cleanCard)) cardType = 'Visa';
         else if (/^5[1-5]/.test(cleanCard)) cardType = 'MasterCard';
@@ -640,10 +683,37 @@ export class PaymentService {
         else cardType = 'Credit Card';
       }
 
+      if (!customerId) {
+        this.logger.error(
+          `USAePay tokenization succeeded but no token/cardref found in response: ${JSON.stringify(resData)}`,
+        );
+        return new ApiResponse(
+          500,
+          { error: 'No token returned by gateway', gatewayResponse: resData },
+          'Failed to obtain card token',
+        );
+      }
+
       customer.usaepayCustomerId = customerId;
       customer.cardLast4 = last4;
       customer.cardBrand = cardType;
       await customer.save();
+
+      if (last10) {
+        await this.customerModel.updateMany(
+          {
+            mobileNumber: { $regex: last10, $options: 'i' },
+            _id: { $ne: customer._id },
+          },
+          {
+            $set: {
+              usaepayCustomerId: customerId,
+              cardLast4: last4,
+              cardBrand: cardType,
+            },
+          },
+        );
+      }
 
       return new ApiResponse(
         200,
@@ -763,23 +833,43 @@ export class PaymentService {
   async getCustomerCardDetails(customerNumber: string) {
     try {
       const cleanNumber = (customerNumber || '').trim();
-      const variations = [
-        cleanNumber,
-        cleanNumber.replace(/^\+/, ''),
-        cleanNumber.startsWith('+91') ? cleanNumber.slice(3) : cleanNumber,
-        cleanNumber.startsWith('+1') ? cleanNumber.slice(2) : cleanNumber,
-      ];
+      const cleanDigits = cleanNumber.replace(/\D/g, '');
+      const last10 =
+        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+      const phoneConditions: any[] = [{ mobileNumber: cleanNumber }];
+      if (cleanDigits) {
+        phoneConditions.push({ mobileNumber: cleanDigits });
+        phoneConditions.push({
+          mobileNumber: { $regex: cleanDigits, $options: 'i' },
+        });
+      }
+      if (last10 && last10 !== cleanDigits) {
+        phoneConditions.push({ mobileNumber: last10 });
+        phoneConditions.push({
+          mobileNumber: { $regex: last10, $options: 'i' },
+        });
+      }
 
       const customer =
         (await this.customerModel.findOne({
-          mobileNumber: { $in: variations },
+          $or: phoneConditions,
           usaepayCustomerId: { $exists: true, $ne: '' },
         })) ||
         (await this.customerModel.findOne({
-          mobileNumber: { $in: variations },
+          $or: phoneConditions,
+          cardLast4: { $exists: true, $ne: '' },
+        })) ||
+        (await this.customerModel.findOne({
+          $or: phoneConditions,
         }));
 
-      if (!customer || !customer.usaepayCustomerId) {
+      const hasSavedCard = !!(
+        customer &&
+        (customer.usaepayCustomerId || customer.cardLast4)
+      );
+
+      if (!customer || !hasSavedCard) {
         return new ApiResponse(
           200,
           {
@@ -805,6 +895,7 @@ export class PaymentService {
           cardMasked: maskedCard,
           cardLast4: last4,
           cardBrand: customer.cardBrand || 'Card',
+          usaepayCustomerId: customer.usaepayCustomerId || null,
         },
         Msg.CUSTOMER_CARD_DETAILS_FETCHED,
       );
@@ -873,13 +964,61 @@ export class PaymentService {
         .findById(dto.customerId)
         .catch(() => null);
 
-      if (!customer) {
-        customer = await this.customerModel.findOne({
-          $or: [
-            { customerId: Number(dto.customerId) || 0 },
-            { mobileNumber: dto.customerId },
-          ],
+      const cleanDigits = String(dto.customerId).replace(/\D/g, '');
+      const last10 =
+        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+      const custPhoneDigits = (customer?.mobileNumber || '').replace(/\D/g, '');
+      const lookupDigits = cleanDigits || custPhoneDigits;
+      const lookupLast10 =
+        lookupDigits.length >= 10 ? lookupDigits.slice(-10) : lookupDigits;
+
+      const phoneConditions: any[] = [];
+      if (dto.customerId) {
+        phoneConditions.push({ mobileNumber: dto.customerId });
+      }
+      if (cleanDigits) {
+        phoneConditions.push({ mobileNumber: cleanDigits });
+      }
+      if (lookupLast10) {
+        phoneConditions.push({ mobileNumber: lookupLast10 });
+        phoneConditions.push({
+          mobileNumber: { $regex: lookupLast10, $options: 'i' },
         });
+      }
+
+      if (customer && !customer.usaepayCustomerId && lookupLast10) {
+        const vaultCustomer = await this.customerModel.findOne({
+          mobileNumber: { $regex: lookupLast10, $options: 'i' },
+          usaepayCustomerId: { $exists: true, $ne: '' },
+        });
+        if (vaultCustomer) {
+          customer.usaepayCustomerId = vaultCustomer.usaepayCustomerId;
+          customer.cardLast4 = customer.cardLast4 || vaultCustomer.cardLast4;
+          customer.cardBrand = customer.cardBrand || vaultCustomer.cardBrand;
+          await customer.save().catch(() => null);
+        }
+      }
+
+      if (!customer) {
+        customer =
+          (await this.customerModel.findOne({
+            $or: [
+              ...phoneConditions,
+              ...(Number(dto.customerId)
+                ? [{ customerId: Number(dto.customerId) }]
+                : []),
+            ],
+            usaepayCustomerId: { $exists: true, $ne: '' },
+          })) ||
+          (await this.customerModel.findOne({
+            $or: [
+              ...phoneConditions,
+              ...(Number(dto.customerId)
+                ? [{ customerId: Number(dto.customerId) }]
+                : []),
+            ],
+          }));
       }
 
       if (!customer) {
@@ -909,10 +1048,14 @@ export class PaymentService {
         payload.key = apiKey;
       }
 
+      payload.creditcard = {
+        number: targetTokenOrId,
+      };
       if (targetTokenOrId.includes('-') || targetTokenOrId.length > 15) {
-        payload.creditcard = { number: targetTokenOrId };
+        payload.cardref = targetTokenOrId;
       } else {
         payload.customer_id = targetTokenOrId;
+        payload.cardref = targetTokenOrId;
       }
 
       this.logger.log(

@@ -34,7 +34,7 @@ jobs:
         run: echo "/home/nodeteam/.local/share/fnm/node-versions/v22.21.1/installation/bin" >> $GITHUB_PATH
 
       - name: run carline backend
-        run: npm run build
+        run: NODE_OPTIONS="--max-old-space-size=1024" npm run build
 
       - name: Run backend
         run: |
