@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { Ride, RideDocument } from './schema/ride.schema';
 import { ApiResponse } from '../../helpers/ApiResponse';
 import { Msg } from 'src/helpers/responseMsg';
 import { CustomerService } from '../customer/customer.service';
+import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
 import { BookIvrRideDto } from './dto/book-ivr-ride.dto';
 import { AdminDispatchDto } from './dto/admin-dispatch.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
@@ -18,8 +19,137 @@ export class RideService {
   constructor(
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
+    @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
     private readonly customerService: CustomerService,
   ) {}
+
+  private async buildDriverMatchConditions(
+    driverIdentifier: string,
+  ): Promise<any[]> {
+    if (!driverIdentifier) return [];
+
+    let driver: DriverDocument | null = null;
+    if (isValidObjectId(driverIdentifier)) {
+      driver = await this.driverModel
+        .findById(driverIdentifier)
+        .catch(() => null);
+    }
+    if (!driver) {
+      const numId = Number(driverIdentifier);
+      if (!isNaN(numId) && numId > 0) {
+        driver = await this.driverModel.findOne({ driverId: numId });
+      }
+    }
+    if (!driver) {
+      const cleanMobile = String(driverIdentifier).replace(/\D/g, '');
+      driver = await this.driverModel.findOne({
+        $or: [
+          { mobileNumber: String(driverIdentifier) },
+          ...(cleanMobile && cleanMobile.length >= 7
+            ? [{ mobileNumber: { $regex: cleanMobile, $options: 'i' } }]
+            : []),
+        ],
+      });
+    }
+
+    const conditions: any[] = [];
+    if (driver) {
+      conditions.push({ driverId: driver._id.toString() });
+      if (driver.driverId) {
+        conditions.push({ driverId: String(driver.driverId) });
+      }
+      if (driver.mobileNumber) {
+        conditions.push({ driverNumber: driver.mobileNumber });
+        const cleanDigits = driver.mobileNumber.replace(/\D/g, '');
+        if (cleanDigits && cleanDigits.length >= 7) {
+          conditions.push({
+            driverNumber: { $regex: cleanDigits, $options: 'i' },
+          });
+        }
+      }
+      if (driver.driverName) {
+        conditions.push({
+          driverName: {
+            $regex: `^${driver.driverName.trim()}$`,
+            $options: 'i',
+          },
+        });
+      }
+    } else {
+      const cleanDigits = String(driverIdentifier).replace(/\D/g, '');
+      conditions.push(
+        { driverId: String(driverIdentifier) },
+        { driverNumber: String(driverIdentifier) },
+      );
+      if (cleanDigits && cleanDigits.length >= 7) {
+        conditions.push({
+          driverNumber: { $regex: cleanDigits, $options: 'i' },
+        });
+      }
+    }
+
+    return conditions;
+  }
+
+  private async buildCustomerMatchConditions(
+    customerIdentifier: string,
+  ): Promise<any[]> {
+    if (!customerIdentifier) return [];
+
+    let customer: CustomerDocument | null = null;
+    if (isValidObjectId(customerIdentifier)) {
+      customer = await this.customerModel
+        .findById(customerIdentifier)
+        .catch(() => null);
+    }
+    if (!customer) {
+      const numId = Number(customerIdentifier);
+      if (!isNaN(numId) && numId > 0) {
+        customer = await this.customerModel.findOne({ customerId: numId });
+      }
+    }
+    if (!customer) {
+      const cleanMobile = String(customerIdentifier).replace(/\D/g, '');
+      customer = await this.customerModel.findOne({
+        $or: [
+          { mobileNumber: String(customerIdentifier) },
+          { accountNumber: String(customerIdentifier) },
+          ...(cleanMobile && cleanMobile.length >= 7
+            ? [{ mobileNumber: { $regex: cleanMobile, $options: 'i' } }]
+            : []),
+        ],
+      });
+    }
+
+    const conditions: any[] = [];
+    if (customer) {
+      if (customer.mobileNumber) {
+        conditions.push({ customerNumber: customer.mobileNumber });
+        const cleanDigits = customer.mobileNumber.replace(/\D/g, '');
+        if (cleanDigits && cleanDigits.length >= 7) {
+          conditions.push({
+            customerNumber: { $regex: cleanDigits, $options: 'i' },
+          });
+        }
+      }
+      if (
+        customer.accountNumber &&
+        customer.accountNumber !== customer.mobileNumber
+      ) {
+        conditions.push({ customerNumber: customer.accountNumber });
+      }
+    } else {
+      const cleanDigits = String(customerIdentifier).replace(/\D/g, '');
+      conditions.push({ customerNumber: String(customerIdentifier) });
+      if (cleanDigits && cleanDigits.length >= 7) {
+        conditions.push({
+          customerNumber: { $regex: cleanDigits, $options: 'i' },
+        });
+      }
+    }
+
+    return conditions;
+  }
 
   async getRides(query: any) {
     try {
@@ -27,14 +157,48 @@ export class RideService {
       const limit = parseInt(query.limit) || 10;
       const skip = (page - 1) * limit;
 
-      const searchFilter: any = {};
-      if (query.search) {
-        searchFilter.$or = [
-          { driverName: { $regex: query.search, $options: 'i' } },
-          { customerNumber: { $regex: query.search, $options: 'i' } },
-          { tripNumber: { $regex: query.search, $options: 'i' } },
-        ];
+      const andFilters: any[] = [];
+
+      // 1. Driver-specific filter (supports driverId, driverNumber, driver)
+      const driverParam = query.driverId || query.driverNumber || query.driver;
+      if (driverParam) {
+        const driverConditions = await this.buildDriverMatchConditions(
+          String(driverParam),
+        );
+        if (driverConditions.length > 0) {
+          andFilters.push({ $or: driverConditions });
+        }
       }
+
+      // 2. Customer-specific filter (supports customerId, customerNumber, customer)
+      const customerParam =
+        query.customerId || query.customerNumber || query.customer;
+      if (customerParam) {
+        const customerConditions = await this.buildCustomerMatchConditions(
+          String(customerParam),
+        );
+        if (customerConditions.length > 0) {
+          andFilters.push({ $or: customerConditions });
+        }
+      }
+
+      // 3. General search filter (maintains exact backwards compatibility)
+      if (query.search) {
+        andFilters.push({
+          $or: [
+            { driverName: { $regex: query.search, $options: 'i' } },
+            { customerNumber: { $regex: query.search, $options: 'i' } },
+            { tripNumber: { $regex: query.search, $options: 'i' } },
+          ],
+        });
+      }
+
+      const searchFilter: any =
+        andFilters.length > 1
+          ? { $and: andFilters }
+          : andFilters.length === 1
+            ? andFilters[0]
+            : {};
 
       const total = await this.rideModel.countDocuments(searchFilter);
       const rawData = await this.rideModel
@@ -60,6 +224,14 @@ export class RideService {
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
+  }
+
+  async getDriverRides(driverId: string, query: any) {
+    return this.getRides({ ...query, driverId });
+  }
+
+  async getCustomerRides(customerId: string, query: any) {
+    return this.getRides({ ...query, customerId });
   }
 
   private normalizeQueueName(queue?: string): string {

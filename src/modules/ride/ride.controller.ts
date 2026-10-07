@@ -1,6 +1,21 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { RideService } from './ride.service';
-import { ApiBearerAuth, ApiHeader, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiHeader,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import { RoleGuard } from '../auth/roles/roles.guard';
 import { Roles } from 'src/modules/auth/roles/roles.decorator';
@@ -37,8 +52,58 @@ export class RideController {
     type: String,
     description: 'Search term to filter results',
   })
+  @ApiQuery({
+    name: 'driverId',
+    required: false,
+    type: String,
+    description: 'Filter rides by Driver ID or phone number',
+  })
+  @ApiQuery({
+    name: 'customerId',
+    required: false,
+    type: String,
+    description: 'Filter rides by Customer ID or phone number',
+  })
   async getRides(@Query() query: any) {
     return this.rideService.getRides(query);
+  }
+
+  @Get('/driver/:driverId')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RoleGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiParam({
+    name: 'driverId',
+    required: true,
+    description: 'Driver MongoDB ID, numeric driverId, or phone number',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  async getDriverRides(
+    @Param('driverId') driverId: string,
+    @Query() query: any,
+  ) {
+    return this.rideService.getDriverRides(driverId, query);
+  }
+
+  @Get('/customer/:customerId')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RoleGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiParam({
+    name: 'customerId',
+    required: true,
+    description: 'Customer MongoDB ID, numeric customerId, or phone number',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  async getCustomerRides(
+    @Param('customerId') customerId: string,
+    @Query() query: any,
+  ) {
+    return this.rideService.getCustomerRides(customerId, query);
   }
 
   @Post('/ivr/book')
