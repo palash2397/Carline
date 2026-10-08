@@ -60,31 +60,8 @@ export class CustomerController {
   async getCustomers(@Query() query: any) {
     return this.customerService.getCustomers(query);
   }
-
-  @Get('/balance-history/:id')
-  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Get customer balance adjustment history',
-    description:
-      'Returns paginated history of all balance additions and deductions with reasons, dates, and admin who performed them.',
-  })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getCustomerBalanceHistoryAlt(
-    @Param('id') id: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-  ) {
-    return this.customerService.getBalanceHistory(id, { page, limit });
-  }
-
   @Get('/:id/balance-history')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Get customer balance adjustment history',
-    description:
-      'Returns paginated history of all balance additions and deductions with reasons, dates, and admin who performed them.',
-  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   async getCustomerBalanceHistory(
@@ -121,11 +98,6 @@ export class CustomerController {
 
   @Post('/add-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Manually add credit/balance to customer account',
-    description:
-      'Increases customer balance and logs an adjustment history record with amount, reason, date/time, and admin user.',
-  })
   @ApiBody({ type: FundCustomerDto })
   async addCustomerCredit(
     @Req() req: any,
@@ -136,11 +108,6 @@ export class CustomerController {
 
   @Post('/deduct-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Manually deduct credit/balance from customer account',
-    description:
-      'Deducts an amount from customer balance, checks for sufficient funds, and logs an adjustment history record.',
-  })
   @ApiBody({ type: DeductCustomerDto })
   async deductCustomerCredit(
     @Req() req: any,
@@ -151,11 +118,6 @@ export class CustomerController {
 
   @Post('/adjust-balance')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Unified balance adjustment (Add or Deduct)',
-    description:
-      'Supports action=ADD or action=DEDUCT, records reason and admin information, and returns updated balance.',
-  })
   @ApiBody({ type: AdjustCustomerBalanceDto })
   async adjustCustomerBalance(
     @Req() req: any,
@@ -166,11 +128,6 @@ export class CustomerController {
 
   @Post('/fund-credit')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
-  @ApiOperation({
-    summary: 'Fund customer credit from saved credit card on file',
-    description:
-      'Charges customer credit card token in USAePay vault and adds funds to their prepaid balance.',
-  })
   @ApiBody({ type: FundCustomerDto })
   async fundCustomerCreditFromCard(
     @Req() req: any,
