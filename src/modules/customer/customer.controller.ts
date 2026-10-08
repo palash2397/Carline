@@ -60,6 +60,19 @@ export class CustomerController {
   async getCustomers(@Query() query: any) {
     return this.customerService.getCustomers(query);
   }
+  @Get('/format-phone')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'phone',
+    required: true,
+    type: String,
+    description: 'Phone number to format and validate',
+    example: '+1 (347) 563-2341',
+  })
+  async formatPhone(@Query('phone') phone: string) {
+    return this.customerService.formatPhone(phone);
+  }
+
   @Get('/:id/balance-history')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @ApiQuery({ name: 'page', required: false, type: Number })

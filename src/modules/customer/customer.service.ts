@@ -17,6 +17,13 @@ import { FundCustomerDto } from './dto/fund-customer.dto';
 import { DeductCustomerDto } from './dto/deduct-customer.dto';
 import { AdjustCustomerBalanceDto } from './dto/adjust-customer-balance.dto';
 import { UserRole } from 'src/common/enums/user/role.enum';
+import {
+  normalizePhoneNumber,
+  formatToNational,
+  formatToE164,
+  isValidPhoneNumber,
+  buildPhoneMatchConditions,
+} from 'src/common/utils/phone-formatter.util';
 
 @Injectable()
 export class CustomerService {
@@ -65,7 +72,9 @@ export class CustomerService {
   }
 
   async findOrCreateCustomer(phone: string, name?: string) {
-    let customer = await this.customerModel.findOne({ mobileNumber: phone });
+    const normalizedPhone = normalizePhoneNumber(phone) || phone;
+    const phoneConditions = buildPhoneMatchConditions(phone, 'mobileNumber');
+    let customer = await this.customerModel.findOne({ $or: phoneConditions });
     if (!customer) {
       const lastCustomer = await this.customerModel
         .findOne()
@@ -77,8 +86,8 @@ export class CustomerService {
 
       customer = new this.customerModel({
         customerId: newCustomerId,
-        mobileNumber: phone,
-        accountNumber: phone,
+        mobileNumber: normalizedPhone,
+        accountNumber: normalizedPhone,
         fullName: name || 'New IVR Customer',
         autoEmail: 'Inactive',
         credit: 0,
@@ -106,11 +115,29 @@ export class CustomerService {
 
   async createCustomer(dto: CreateCustomerDto) {
     try {
-      const existing = await this.customerModel.findOne({
-        mobileNumber: dto.mobileNumber,
-      });
+      const normalizedPhone = normalizePhoneNumber(dto.mobileNumber);
+      if (!normalizedPhone || normalizedPhone.length < 7) {
+        return new ApiResponse(400, {}, 'Valid phone number is required');
+      }
+
+      const phoneConditions = buildPhoneMatchConditions(
+        dto.mobileNumber,
+        'mobileNumber',
+      );
+      const existing = await this.customerModel.findOne({ $or: phoneConditions });
       if (existing) {
-        return new ApiResponse(409, {}, Msg.CUSTOMER_ALREADY_EXISTS);
+        return new ApiResponse(
+          409,
+          {
+            existingCustomer: {
+              _id: existing._id,
+              customerId: existing.customerId,
+              fullName: existing.fullName,
+              mobileNumber: existing.mobileNumber,
+            },
+          },
+          'Customer with this phone number already exists',
+        );
       }
 
       const lastCustomer = await this.customerModel
@@ -126,9 +153,10 @@ export class CustomerService {
       const newCustomer = new this.customerModel({
         ...dto,
         customerId: newCustomerId,
+        mobileNumber: normalizedPhone,
         address: addressVal,
         fullAddress: addressVal,
-        accountNumber: dto.accountNumber || dto.mobileNumber,
+        accountNumber: dto.accountNumber || normalizedPhone,
         email: dto.email || '-',
         autoEmail: dto.autoEmail || 'Inactive',
         credit: dto.credit !== undefined ? Number(dto.credit) : 0,
@@ -152,6 +180,40 @@ export class CustomerService {
       }
 
       const updateData: any = { ...dto };
+
+      if (dto.mobileNumber) {
+        const normalizedPhone = normalizePhoneNumber(dto.mobileNumber);
+        if (!normalizedPhone || normalizedPhone.length < 7) {
+          return new ApiResponse(400, {}, 'Valid phone number is required');
+        }
+
+        const phoneConditions = buildPhoneMatchConditions(
+          dto.mobileNumber,
+          'mobileNumber',
+        );
+        const duplicate = await this.customerModel.findOne({
+          _id: { $ne: existingCustomer._id },
+          $or: phoneConditions,
+        });
+
+        if (duplicate) {
+          return new ApiResponse(
+            409,
+            {
+              existingCustomer: {
+                _id: duplicate._id,
+                customerId: duplicate.customerId,
+                fullName: duplicate.fullName,
+                mobileNumber: duplicate.mobileNumber,
+              },
+            },
+            'Another customer already exists with this phone number',
+          );
+        }
+
+        updateData.mobileNumber = normalizedPhone;
+      }
+
       if (dto.address !== undefined) {
         updateData.fullAddress = dto.address;
         updateData.address = dto.address;
@@ -175,6 +237,25 @@ export class CustomerService {
       console.log(`Error while updating the customer:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
+  }
+
+  formatPhone(phone: string) {
+    const normalized = normalizePhoneNumber(phone);
+    const national = formatToNational(phone);
+    const e164 = formatToE164(phone);
+    const isValid = isValidPhoneNumber(phone);
+    return new ApiResponse(
+      200,
+      {
+        raw: phone,
+        normalized,
+        formatted: national,
+        national,
+        e164,
+        isValid,
+      },
+      'Phone number formatted successfully',
+    );
   }
 
   async deleteCustomer(id: string) {
@@ -210,23 +291,10 @@ export class CustomerService {
       if (byId) return byId;
     }
 
-    const cleanDigits = raw.replace(/\D/g, '');
-    const last10 =
-      cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-
     const orConditions: any[] = [
       { customerId: Number(raw) || 0 },
-      { mobileNumber: raw },
+      ...buildPhoneMatchConditions(raw, 'mobileNumber'),
     ];
-    if (cleanDigits) {
-      orConditions.push({ mobileNumber: cleanDigits });
-    }
-    if (last10) {
-      orConditions.push({ mobileNumber: last10 });
-      orConditions.push({
-        mobileNumber: { $regex: last10, $options: 'i' },
-      });
-    }
     return this.customerModel.findOne({ $or: orConditions });
   }
 

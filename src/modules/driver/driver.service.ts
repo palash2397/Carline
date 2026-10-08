@@ -19,6 +19,10 @@ import {
 } from './schema/driver-earnings-audit.schema';
 
 import { UserRole } from 'src/common/enums/user/role.enum';
+import {
+  normalizePhoneNumber,
+  buildPhoneMatchConditions,
+} from 'src/common/utils/phone-formatter.util';
 
 @Injectable()
 export class DriverService {
@@ -253,21 +257,27 @@ export class DriverService {
   async createDriver(dto: any) {
     try {
       const rawMobile = dto.mobileNumber || '';
-      const cleanMobile = rawMobile.replace(/\D/g, '');
-      if (!cleanMobile) {
+      const normalizedPhone = normalizePhoneNumber(rawMobile);
+      if (!normalizedPhone || normalizedPhone.length < 7) {
         return new ApiResponse(400, {}, 'Valid mobile number is required');
       }
 
-      const existing = await this.driverModel.findOne({
-        $or: [
-          { mobileNumber: cleanMobile },
-          { mobileNumber: rawMobile },
-        ],
-      });
+      const phoneConditions = buildPhoneMatchConditions(
+        rawMobile,
+        'mobileNumber',
+      );
+      const existing = await this.driverModel.findOne({ $or: phoneConditions });
       if (existing) {
         return new ApiResponse(
-          400,
-          {},
+          409,
+          {
+            existingDriver: {
+              _id: existing._id,
+              driverId: existing.driverId,
+              driverName: existing.driverName,
+              mobileNumber: existing.mobileNumber,
+            },
+          },
           'A driver with this mobile number already exists',
         );
       }
@@ -281,7 +291,7 @@ export class DriverService {
       const newDriver = new this.driverModel({
         ...dto,
         status: dto.status || 'ACTIVE',
-        mobileNumber: cleanMobile,
+        mobileNumber: normalizedPhone,
         driverId: newDriverId,
       });
 
@@ -314,22 +324,34 @@ export class DriverService {
       delete updateData.id;
 
       if (dto.mobileNumber) {
-        const cleanMobile = dto.mobileNumber.replace(/\D/g, '');
+        const normalizedPhone = normalizePhoneNumber(dto.mobileNumber);
+        if (!normalizedPhone || normalizedPhone.length < 7) {
+          return new ApiResponse(400, {}, 'Valid mobile number is required');
+        }
+
+        const phoneConditions = buildPhoneMatchConditions(
+          dto.mobileNumber,
+          'mobileNumber',
+        );
         const duplicate = await this.driverModel.findOne({
           _id: { $ne: existingDriver._id },
-          $or: [
-            { mobileNumber: cleanMobile },
-            { mobileNumber: dto.mobileNumber },
-          ],
+          $or: phoneConditions,
         });
         if (duplicate) {
           return new ApiResponse(
-            400,
-            {},
+            409,
+            {
+              existingDriver: {
+                _id: duplicate._id,
+                driverId: duplicate.driverId,
+                driverName: duplicate.driverName,
+                mobileNumber: duplicate.mobileNumber,
+              },
+            },
             'Another driver with this mobile number already exists',
           );
         }
-        updateData.mobileNumber = cleanMobile;
+        updateData.mobileNumber = normalizedPhone;
       }
 
       if (dto.batch !== undefined && dto.batch !== null) {

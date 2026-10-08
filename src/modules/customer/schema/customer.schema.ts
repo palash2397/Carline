@@ -26,7 +26,7 @@ export class Customer {
   @Prop()
   accountNumber: string;
 
-  @Prop()
+  @Prop({ index: true })
   mobileNumber: string;
 
   @Prop({ type: Number, default: 0 })
