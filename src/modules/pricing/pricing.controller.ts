@@ -9,12 +9,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PricingService } from './pricing.service';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
 import { UpdateZoneNamesDto } from './dto/update-zone-names.dto';
 import { BulkUpdatePricingDto } from './dto/bulk-update-pricing.dto';
+import { CalculateFareDto } from './dto/calculate-fare.dto';
 import { JwtAuthGuard } from '../auth/jwt/jwt-auth.guard';
 import { RoleGuard } from '../auth/roles/roles.guard';
 import { Roles } from '../auth/roles/roles.decorator';
@@ -94,18 +95,16 @@ export class PricingController {
   }
 
   @Post('/calculate')
-  async calculateFare(
-    @Body()
-    body: {
-      zone: string;
-      durationMinutes: number;
-      startDateTime?: string;
-    },
-  ) {
+  @ApiOperation({
+    summary: 'Calculate ride fare for a given zone and duration',
+    description: 'Calculates the base fare and any extra minute charges based on New York timezone rules.',
+  })
+  @ApiBody({ type: CalculateFareDto })
+  async calculateFare(@Body() dto: CalculateFareDto) {
     return this.pricingService.calculateZoneFare(
-      body.zone,
-      body.durationMinutes,
-      body.startDateTime,
+      dto.zone,
+      dto.durationMinutes,
+      dto.startDateTime,
     );
   }
 }
