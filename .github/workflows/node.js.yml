@@ -2,24 +2,61 @@ name: carline CI/CD
 
 on:
   push:
-    branches: ['main']
+    branches: ['main', 'develop']
 
 jobs:
-  deploy:
-    runs-on: [self-hosted, carline]
-
-    strategy:
-      matrix:
-        node-version: [22.x]
-
+  # -------------------------------------------------------------
+  # Development Deployment (Runs on 'develop' branch push)
+  # -------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to Development
+    if: github.ref == 'refs/heads/develop'
+    runs-on: [self-hosted, mail]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm install --prefer-offline --no-audit
+
+      - name: Create .env file safely
+        run: |
+          rm -f .env
+          printf "%s" "${{ secrets.DEV_ENV_FILE }}" > .env
+          chmod 600 .env
+
+      - name: Add Node & PM2 to PATH
+        run: echo "/home/nodeteam/.local/share/fnm/node-versions/v22.21.1/installation/bin" >> $GITHUB_PATH
+
+      - name: Build project
+        run: NODE_OPTIONS="--max-old-space-size=1024" npm run build
+
+      - name: Run backend with PM2
+        run: |
+          pm2 delete carline-backend || true
+          pm2 start dist/main.js --name carline-backend
+          pm2 save
+
+  # -------------------------------------------------------------
+  # Production Deployment (Runs on 'main' branch push)
+  # -------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, carline]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
 
       - name: Install dependencies
         run: npm install --prefer-offline --no-audit
@@ -33,10 +70,10 @@ jobs:
       - name: Add Node & PM2 to PATH
         run: echo "/home/nodeteam/.local/share/fnm/node-versions/v22.21.1/installation/bin" >> $GITHUB_PATH
 
-      - name: run carline backend
+      - name: Build project
         run: NODE_OPTIONS="--max-old-space-size=1024" npm run build
 
-      - name: Run backend
+      - name: Run backend with PM2
         run: |
           pm2 delete carline-backend || true
           pm2 start dist/main.js --name carline-backend
