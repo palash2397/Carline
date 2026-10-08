@@ -6,10 +6,32 @@ on:
 
 jobs:
   # -------------------------------------------------------------
-  # Development Deployment (Runs on 'develop' branch push)
+  # Stage 1: Check Backend (Build & Syntax Verification)
+  # -------------------------------------------------------------
+  check-backend:
+    name: Check Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm install --prefer-offline --no-audit
+
+      - name: Verify build compilation
+        run: NODE_OPTIONS="--max-old-space-size=1024" npm run build
+
+  # -------------------------------------------------------------
+  # Stage 2: Deploy to Development (Runs on 'develop' branch push)
   # -------------------------------------------------------------
   deploy-dev:
     name: Deploy to Development
+    needs: check-backend
     if: github.ref == 'refs/heads/develop'
     runs-on: [self-hosted, mail]
     steps:
@@ -43,10 +65,11 @@ jobs:
           pm2 save
 
   # -------------------------------------------------------------
-  # Production Deployment (Runs on 'main' branch push)
+  # Stage 2: Deploy to Production (Runs on 'main' branch push)
   # -------------------------------------------------------------
   deploy-prod:
     name: Deploy to Production
+    needs: check-backend
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, carline]
     steps:
