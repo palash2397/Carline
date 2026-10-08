@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, carline]
 
     strategy:
       matrix:
@@ -27,7 +27,7 @@ jobs:
       - name: Create .env file safely
         run: |
           rm -f .env
-          printf "%s" "${{ secrets.DEV_ENV_FILE }}" > .env
+          printf "%s" "${{ secrets.PROD_ENV_FILE }}" > .env
           chmod 600 .env
 
       - name: Add Node & PM2 to PATH
