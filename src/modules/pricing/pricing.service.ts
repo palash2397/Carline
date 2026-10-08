@@ -286,17 +286,39 @@ export class PricingService {
     }
 
     const dateObj = startDateTime ? new Date(startDateTime) : new Date();
-    const dayNames = [
-      DayOfWeekEnum.SUNDAY,
-      DayOfWeekEnum.MONDAY,
-      DayOfWeekEnum.TUESDAY,
-      DayOfWeekEnum.WEDNESDAY,
-      DayOfWeekEnum.THURSDAY,
-      DayOfWeekEnum.FRIDAY,
-      DayOfWeekEnum.SATURDAY,
-    ];
-    const currentDay = dayNames[dateObj.getDay()];
-    const currentHour = dateObj.getHours();
+    const timeZone = process.env.TIMEZONE || 'America/New_York';
+
+    let currentDay: DayOfWeekEnum;
+    let currentHour: number;
+
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'long',
+        hour: 'numeric',
+        hourCycle: 'h23',
+      }).formatToParts(dateObj);
+
+      const dayStr = parts.find((p) => p.type === 'weekday')?.value?.toUpperCase();
+      currentDay =
+        (DayOfWeekEnum as any)[dayStr || ''] || DayOfWeekEnum.SUNDAY;
+      currentHour = parseInt(
+        parts.find((p) => p.type === 'hour')?.value || '0',
+        10,
+      );
+    } catch (e) {
+      const dayNames = [
+        DayOfWeekEnum.SUNDAY,
+        DayOfWeekEnum.MONDAY,
+        DayOfWeekEnum.TUESDAY,
+        DayOfWeekEnum.WEDNESDAY,
+        DayOfWeekEnum.THURSDAY,
+        DayOfWeekEnum.FRIDAY,
+        DayOfWeekEnum.SATURDAY,
+      ];
+      currentDay = dayNames[dateObj.getDay()];
+      currentHour = dateObj.getHours();
+    }
 
     // Query active rule matching Zone, Day, and Hour range
     let matchingRule = await this.pricingRuleModel

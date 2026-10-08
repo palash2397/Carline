@@ -382,9 +382,22 @@ export class IvrService {
             Msg.IVR_PLAY_FINISH_MENU,
           );
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+          if (!activeRide.selectedZone) {
+            return new ApiResponse(
+              200,
+              { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+              Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+            );
+          }
           return new ApiResponse(
             200,
-            { menu: 'PAYMENT_OPTIONS' },
+            {
+              action: 'PLAY_PAYMENT_MENU',
+              menu: 'PAYMENT_OPTIONS',
+              calculatedFare: activeRide.rideAmount,
+              selectedZone: activeRide.selectedZone,
+              currency: 'USD',
+            },
             Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU,
           );
         }
@@ -453,6 +466,38 @@ export class IvrService {
         } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
           // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
           if (!activeRide.selectedZone) {
+            if (
+              dto.dtmfInput === '9' ||
+              dto.dtmfInput === '3' ||
+              dto.action === 'CANCEL_TRIP' ||
+              dto.action === 'CANCEL'
+            ) {
+              activeRide.rideStatus = RideStatus.CANCELLED;
+              await activeRide.save();
+              await this.cancelOtherCalls(activeRide.tripNumber);
+              driver.activeRideId = '';
+              driver.isAvailable = true;
+              driver.ongoingRides = 'NO';
+              await driver.save();
+              return new ApiResponse(
+                200,
+                {
+                  action: 'TRIP_CANCELLED',
+                  tripNumber: activeRide.tripNumber,
+                  workflowStage: 'CANCELLED',
+                  rideStatus: 'CANCELLED',
+                },
+                Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
+              );
+            }
+
+            if (!['1', '2', '3', '4'].includes(dto.dtmfInput)) {
+              return new ApiResponse(
+                200,
+                { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+                Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+              );
+            }
             let durationMinutes = 0;
             if (
               activeRide.rideStartDateTime &&
@@ -1407,7 +1452,9 @@ export class IvrService {
             fareOverrideApplied: false,
           };
         } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
-          workflowStage = 'AWAITING_PAYMENT';
+          workflowStage = ride.selectedZone
+            ? 'AWAITING_PAYMENT'
+            : 'ZONE_SELECTION';
 
           let durationMinutes = 0;
           if (ride.rideStartDateTime && ride.rideCompleteDateTime) {
@@ -1466,6 +1513,9 @@ export class IvrService {
             ...baseTripData,
             tripNumber: ride.tripNumber,
             status: ride.rideStatus,
+            workflowStage,
+            menu: ride.selectedZone ? 'PAYMENT_OPTIONS' : 'ZONE_SELECTION',
+            action: ride.selectedZone ? 'PLAY_PAYMENT_MENU' : 'PLAY_ZONE_MENU',
             currency,
             durationMinutes,
             selectedZone: ride.selectedZone,
