@@ -9,7 +9,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { PricingService } from './pricing.service';
 import { CreatePricingRuleDto } from './dto/create-pricing-rule.dto';
 import { UpdatePricingRuleDto } from './dto/update-pricing-rule.dto';
@@ -95,10 +101,6 @@ export class PricingController {
   }
 
   @Post('/calculate')
-  @ApiOperation({
-    summary: 'Calculate ride fare for a given zone and duration',
-    description: 'Calculates the base fare and any extra minute charges based on New York timezone rules.',
-  })
   @ApiBody({ type: CalculateFareDto })
   async calculateFare(@Body() dto: CalculateFareDto) {
     return this.pricingService.calculateZoneFare(

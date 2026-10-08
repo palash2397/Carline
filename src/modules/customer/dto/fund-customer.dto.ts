@@ -3,13 +3,14 @@ import {
   IsNumber,
   IsString,
   IsNotEmpty,
+  IsOptional,
   Min,
 } from 'class-validator';
 
 export class FundCustomerDto {
   @ApiProperty({
     example: '691aa8f81c36af5462c4551c',
-    description: 'Customer ID',
+    description: 'Customer ID, phone number, or numeric customerId',
     required: true,
   })
   @IsNotEmpty()
@@ -17,7 +18,7 @@ export class FundCustomerDto {
   id: string;
 
   @ApiProperty({
-    example: 1000,
+    example: 100,
     description: 'Amount to be added',
     required: true,
   })
@@ -25,4 +26,13 @@ export class FundCustomerDto {
   @IsNumber()
   @Min(0.01)
   amount: number;
+
+  @ApiProperty({
+    example: 'Prepaid deposit by customer',
+    description: 'Reason or note for adding credit',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }

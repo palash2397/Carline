@@ -209,6 +209,12 @@ export const Msg = {
   CUSTOMERS_FETCHED: 'Customers fetched successfully',
   CUSTOMER_ALREADY_EXISTS: 'Customer already exists',
   CUSTOMER_CREDIT_ADDED: 'Customer credit added successfully',
+  CUSTOMER_CREDIT_DEDUCTED: 'Customer credit deducted successfully',
+  CUSTOMER_BALANCE_ADJUSTED: 'Customer balance adjusted successfully',
+  CUSTOMER_BALANCE_HISTORY_FETCHED:
+    'Customer balance history fetched successfully',
+  INSUFFICIENT_CUSTOMER_BALANCE:
+    'Insufficient customer balance for this deduction',
   AMOUNT_POSITIVE_REQUIRED: 'Amount must be a positive number',
 
   // Company
