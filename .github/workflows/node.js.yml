@@ -11,7 +11,7 @@ jobs:
   deploy-dev:
     name: Deploy to Development
     if: github.ref == 'refs/heads/develop'
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, mail]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
