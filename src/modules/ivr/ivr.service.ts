@@ -468,7 +468,6 @@ export class IvrService {
           if (!activeRide.selectedZone) {
             if (
               dto.dtmfInput === '9' ||
-              dto.dtmfInput === '3' ||
               dto.action === 'CANCEL_TRIP' ||
               dto.action === 'CANCEL'
             ) {
