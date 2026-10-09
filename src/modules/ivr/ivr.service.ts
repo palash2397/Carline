@@ -183,6 +183,9 @@ export class IvrService {
             : 'SAY_PAYMENT_FAILED',
           menu: isApproved ? undefined : 'PAYMENT_OPTIONS',
           tripNumber: ride.tripNumber,
+          calculatedFare: ride.rideAmount,
+          selectedZone: ride.selectedZone,
+          currency: 'USD',
           driver: {
             _id: driver._id,
             driverId: driver.driverId,
@@ -243,7 +246,8 @@ export class IvrService {
   }
 
   async processDriverAction(dto: IvrDriverActionDto) {
-    const callerNumber =
+    try {
+      const callerNumber =
       dto.callerNumber || dto.driverNumber || dto.phoneNumber || '';
     const driver = await this.findDriverByPhoneNumber(callerNumber);
 
@@ -267,6 +271,21 @@ export class IvrService {
     let activeRide: RideDocument | null = null;
     if (driver.activeRideId) {
       activeRide = await this.rideModel.findById(driver.activeRideId);
+      if (
+        activeRide &&
+        (activeRide.rideStatus === RideStatus.COMPLETED ||
+          activeRide.rideStatus === 'COMPLETED' ||
+          activeRide.rideStatus === RideStatus.CANCELLED ||
+          activeRide.rideStatus === 'CANCELLED' ||
+          activeRide.paymentStatus === PaymentStatus.COMPLETED ||
+          activeRide.paymentStatus === 'COMPLETED')
+      ) {
+        driver.activeRideId = '';
+        driver.isAvailable = true;
+        driver.ongoingRides = 'NO';
+        await driver.save();
+        activeRide = null;
+      }
     }
 
     if (!activeRide) {
@@ -422,6 +441,7 @@ export class IvrService {
           activeRide.driverId = '';
           driver.activeRideId = '';
           driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
@@ -456,6 +476,11 @@ export class IvrService {
         ) {
           activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
           activeRide.rideCompleteDateTime = new Date().toISOString();
+          if (driver) {
+            activeRide.driverId = driver._id.toString();
+            activeRide.driverNumber = driver.mobileNumber;
+            activeRide.driverName = driver.driverName;
+          }
           await activeRide.save();
           await driver.save();
           return new ApiResponse(
@@ -603,7 +628,7 @@ export class IvrService {
             }
 
             // Step 1: Check if customer has enough prepaid money/balance on account
-            if ((customer.credit || 0) >= fareAmount && fareAmount > 0) {
+            if ((customer.credit || 0) >= fareAmount && fareAmount >= 0) {
               customer.credit = Number(
                 ((customer.credit || 0) - fareAmount).toFixed(2),
               );
@@ -831,7 +856,15 @@ export class IvrService {
       }
     }
 
-    return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
+      return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
+    } catch (error) {
+      console.error('Error in processDriverAction:', error);
+      return new ApiResponse(
+        500,
+        { action: 'PLAY_PAYMENT_MENU', menu: 'PAYMENT_OPTIONS' },
+        Msg.SERVER_ERROR,
+      );
+    }
   }
 
   private async handleFareOverride(
