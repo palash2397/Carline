@@ -48,16 +48,27 @@ export class PricingService {
     }
   }
 
+  normalizeZone(zoneInput?: string): ZoneEnum {
+    if (!zoneInput) return ZoneEnum.ZONE_1;
+    const clean = zoneInput.toString().trim().toUpperCase().replace(/[\s\-_]/g, '');
+    if (clean === '1' || clean === 'ZONE1' || clean.includes('LOCAL')) {
+      return ZoneEnum.ZONE_1;
+    }
+    if (clean === '2' || clean === 'ZONE2' || clean.includes('SEMI') || clean.includes('SAMI')) {
+      return ZoneEnum.ZONE_2;
+    }
+    if (clean === '3' || clean === 'ZONE3' || clean.includes('GLILUS') || clean.includes('GHIVELOS')) {
+      return ZoneEnum.ZONE_3;
+    }
+    if (clean === '4' || clean === 'ZONE4') {
+      return ZoneEnum.ZONE_4;
+    }
+    return ZoneEnum.ZONE_1;
+  }
+
   async getPricingMatrix(zoneInput?: string) {
     try {
-      let targetZone: ZoneEnum = ZoneEnum.ZONE_1;
-      if (zoneInput === '2' || zoneInput === 'ZONE_2' || zoneInput === ZoneEnum.ZONE_2) {
-        targetZone = ZoneEnum.ZONE_2;
-      } else if (zoneInput === '3' || zoneInput === 'ZONE_3' || zoneInput === ZoneEnum.ZONE_3) {
-        targetZone = ZoneEnum.ZONE_3;
-      } else if (zoneInput === '4' || zoneInput === 'ZONE_4' || zoneInput === ZoneEnum.ZONE_4) {
-        targetZone = ZoneEnum.ZONE_4;
-      }
+      const targetZone: ZoneEnum = this.normalizeZone(zoneInput);
 
       const rules = await this.pricingRuleModel.find({
         zone: targetZone,
@@ -273,19 +284,17 @@ export class PricingService {
     durationMinutes: number,
     startDateTime?: string,
   ) {
-    // Map digit or string to ZoneEnum
-    let targetZone: ZoneEnum = ZoneEnum.ZONE_1;
-    if (zoneInput === '1' || zoneInput === ZoneEnum.ZONE_1 || zoneInput === 'ZONE_1') {
-      targetZone = ZoneEnum.ZONE_1;
-    } else if (zoneInput === '2' || zoneInput === ZoneEnum.ZONE_2 || zoneInput === 'ZONE_2') {
-      targetZone = ZoneEnum.ZONE_2;
-    } else if (zoneInput === '3' || zoneInput === ZoneEnum.ZONE_3 || zoneInput === 'ZONE_3') {
-      targetZone = ZoneEnum.ZONE_3;
-    } else if (zoneInput === '4' || zoneInput === ZoneEnum.ZONE_4 || zoneInput === 'ZONE_4') {
-      targetZone = ZoneEnum.ZONE_4;
+    // Map digit or string to ZoneEnum safely
+    const targetZone: ZoneEnum = this.normalizeZone(zoneInput);
+
+    const safeDuration = Math.max(0, Math.round(Number(durationMinutes) || 0));
+
+    // Ensure valid start date, default to now
+    let dateObj = new Date();
+    if (startDateTime && !isNaN(new Date(startDateTime).getTime())) {
+      dateObj = new Date(startDateTime);
     }
 
-    const dateObj = startDateTime ? new Date(startDateTime) : new Date();
     const timeZone = process.env.TIMEZONE || 'America/New_York';
 
     let currentDay: DayOfWeekEnum;
@@ -301,12 +310,17 @@ export class PricingService {
 
       const dayStr = parts.find((p) => p.type === 'weekday')?.value?.toUpperCase();
       currentDay =
-        (DayOfWeekEnum as any)[dayStr || ''] || DayOfWeekEnum.SUNDAY;
-      currentHour = parseInt(
+        (DayOfWeekEnum as any)[dayStr || ''] || DayOfWeekEnum.MONDAY;
+      const rawHour = parseInt(
         parts.find((p) => p.type === 'hour')?.value || '0',
         10,
       );
+      currentHour = rawHour === 24 ? 0 : Math.min(23, Math.max(0, rawHour));
     } catch (e) {
+      // Fallback computing in America/New_York safely
+      const nyDate = new Date(
+        dateObj.toLocaleString('en-US', { timeZone: 'America/New_York' }),
+      );
       const dayNames = [
         DayOfWeekEnum.SUNDAY,
         DayOfWeekEnum.MONDAY,
@@ -316,55 +330,93 @@ export class PricingService {
         DayOfWeekEnum.FRIDAY,
         DayOfWeekEnum.SATURDAY,
       ];
-      currentDay = dayNames[dateObj.getDay()];
-      currentHour = dateObj.getHours();
+      currentDay = dayNames[nyDate.getDay()];
+      currentHour = nyDate.getHours();
     }
 
-    // Query active rule matching Zone, Day, and Hour range
-    let matchingRule = await this.pricingRuleModel
-      .findOne({
+    // 1. Query active candidate rules matching Zone, Day, and Hour window
+    const candidates = await this.pricingRuleModel
+      .find({
         zone: targetZone,
         days: currentDay,
         startHour: { $lte: currentHour },
         endHour: { $gte: currentHour },
         isActive: true,
       })
-      .sort({ createdAt: -1 });
+      .lean();
 
-    // Fallback: match Zone & Day regardless of hour
+    let matchingRule: any = null;
+
+    if (candidates && candidates.length > 0) {
+      // Prioritize the most specific rule first:
+      // Smaller time span (e.g. 1-hour slot beats 24-hour broad rule)
+      // Then most recently updated
+      candidates.sort((a, b) => {
+        const spanA = a.endHour - a.startHour;
+        const spanB = b.endHour - b.startHour;
+        if (spanA !== spanB) {
+          return spanA - spanB;
+        }
+        return (
+          new Date(b['updatedAt'] || b['createdAt'] || 0).getTime() -
+          new Date(a['updatedAt'] || a['createdAt'] || 0).getTime()
+        );
+      });
+      matchingRule = candidates[0];
+    }
+
+    // 2. Fallback: match 24/7 or all-day default rule for that day in this zone (0-23)
     if (!matchingRule) {
       matchingRule = await this.pricingRuleModel
         .findOne({
           zone: targetZone,
           days: currentDay,
+          startHour: 0,
+          endHour: 23,
           isActive: true,
         })
-        .sort({ createdAt: -1 });
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
     }
 
-    // Fallback: match Zone default rule
+    // 3. Fallback: match all-day general rule across all days in this zone
+    if (!matchingRule) {
+      matchingRule = await this.pricingRuleModel
+        .findOne({
+          zone: targetZone,
+          startHour: 0,
+          endHour: 23,
+          isActive: true,
+        })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+    }
+
+    // 4. Fallback: match standard active rule for this zone (sorted by lowest baseFare as baseline)
     if (!matchingRule) {
       matchingRule = await this.pricingRuleModel
         .findOne({
           zone: targetZone,
           isActive: true,
         })
-        .sort({ createdAt: -1 });
+        .sort({ baseFare: 1, createdAt: -1 })
+        .lean();
     }
 
-    const baseFare = matchingRule ? matchingRule.baseFare : 2.0;
-    const freeMinutes = matchingRule ? matchingRule.freeMinutes : 5;
-    const perMinuteRate = matchingRule ? matchingRule.perMinuteRate : 2.0;
+    // Baseline defaults if database has zero rules initialized
+    const baseFare = matchingRule ? Number(matchingRule.baseFare) : 2.0;
+    const freeMinutes = matchingRule ? Number(matchingRule.freeMinutes) : 5;
+    const perMinuteRate = matchingRule ? Number(matchingRule.perMinuteRate) : 2.0;
     const currency = matchingRule ? matchingRule.currency : 'USD';
 
-    const extraMinutes = Math.max(0, durationMinutes - freeMinutes);
+    const extraMinutes = Math.max(0, safeDuration - freeMinutes);
     const calculatedFare = Number(
       (baseFare + extraMinutes * perMinuteRate).toFixed(2),
     );
 
     return {
       zone: targetZone,
-      durationMinutes,
+      durationMinutes: safeDuration,
       baseFare,
       freeMinutes,
       baseTimeMinutes: freeMinutes,
@@ -373,7 +425,9 @@ export class PricingService {
       calculatedFare,
       finalFare: calculatedFare,
       currency,
-      matchedRule: matchingRule ? matchingRule.ruleName : 'Default Fallback Rule',
+      matchedRule: matchingRule
+        ? matchingRule.ruleName
+        : 'Default Fallback Rule',
     };
   }
 
