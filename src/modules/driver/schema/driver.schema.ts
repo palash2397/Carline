@@ -107,6 +107,12 @@ export class Driver {
 
   @Prop({ type: String, default: null })
   activeRideId: string;
+
+  @Prop({ type: Number, default: 30 })
+  commissionPercentage: number;
+
+  @Prop({ type: String, default: '' })
+  notes: string;
 }
 
 export const DriverSchema = SchemaFactory.createForClass(Driver);

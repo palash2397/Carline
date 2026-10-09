@@ -89,4 +89,22 @@ export class CreateDriverDto {
   @IsOptional()
   @IsNumber()
   totalEarnings?: number;
+
+  @ApiProperty({
+    example: 30,
+    description: 'Company commission percentage (default: 30%)',
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  commissionPercentage?: number;
+
+  @ApiProperty({
+    example: 'Driver works weekday mornings',
+    description: 'Staff notes / comments',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

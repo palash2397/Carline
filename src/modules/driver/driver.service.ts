@@ -890,4 +890,381 @@ export class DriverService {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }
+
+  async getDriverEarningsRange(driverIdentifier: string, query: any) {
+    try {
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(driverIdentifier)) {
+        driver = await this.driverModel.findById(driverIdentifier);
+      }
+      if (!driver) {
+        const numId = parseInt(driverIdentifier) || 0;
+        const phoneConditions = buildPhoneMatchConditions(
+          String(driverIdentifier),
+          'mobileNumber',
+        );
+        driver = await this.driverModel.findOne({
+          $or: [
+            ...(numId > 0 ? [{ driverId: numId }] : []),
+            ...phoneConditions,
+          ],
+        });
+      }
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      const numberDigits = (driver.mobileNumber || '').replace(/\D/g, '');
+      const driverMatchConditions: any[] = [
+        { driverId: driver._id.toString() },
+        { driverNumber: driver.mobileNumber },
+      ];
+      if (driver.driverId) {
+        driverMatchConditions.push({ driverId: String(driver.driverId) });
+      }
+      if (numberDigits && numberDigits.length >= 7) {
+        driverMatchConditions.push({
+          driverNumber: { $regex: numberDigits, $options: 'i' },
+        });
+      }
+      if (driver.driverName) {
+        driverMatchConditions.push({
+          driverName: { $regex: `^${driver.driverName.trim()}$`, $options: 'i' },
+        });
+      }
+
+      const rideQuery: any = {
+        $or: driverMatchConditions,
+        rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
+      };
+
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
+
+      if (query.fromDate) {
+        const d = new Date(query.fromDate);
+        if (!isNaN(d.getTime())) {
+          d.setHours(0, 0, 0, 0);
+          startDate = d;
+        }
+      }
+
+      if (query.toDate) {
+        const d = new Date(query.toDate);
+        if (!isNaN(d.getTime())) {
+          d.setHours(23, 59, 59, 999);
+          endDate = d;
+        }
+      }
+
+      if (startDate || endDate) {
+        const dateCond: any = {};
+        if (startDate) dateCond.$gte = startDate;
+        if (endDate) dateCond.$lte = endDate;
+
+        const orDateList: any[] = [{ createdAt: dateCond }];
+        if (startDate) {
+          orDateList.push({
+            rideCompleteDateTime: {
+              $gte: startDate.toISOString(),
+              ...(endDate ? { $lte: endDate.toISOString() } : {}),
+            },
+          });
+        }
+        rideQuery.$and = [{ $or: orDateList }];
+      }
+
+      const completedRides = await this.rideModel
+        .find(rideQuery)
+        .sort({ createdAt: -1, rideCompleteDateTime: -1 })
+        .lean()
+        .exec();
+
+      let totalFares = 0;
+      let totalCash = 0;
+      let totalCreditCard = 0;
+      let totalAccount = 0;
+
+      const commissionPercentage =
+        driver.commissionPercentage !== undefined &&
+        driver.commissionPercentage !== null
+          ? Number(driver.commissionPercentage)
+          : 30;
+      const driverSharePercentage = Number((100 - commissionPercentage).toFixed(2));
+
+      const trips = completedRides.map((ride: any) => {
+        const fare = Number((ride.rideAmount || 0).toFixed(2));
+        totalFares += fare;
+
+        const payment = String(
+          ride.paymentType || ride.payment || 'CASH',
+        ).toUpperCase();
+
+        let standardizedPayment = 'CASH';
+        if (payment === 'CASH') {
+          totalCash += fare;
+          standardizedPayment = 'CASH';
+        } else if (
+          payment === 'CARD' ||
+          payment === 'CREDIT_CARD' ||
+          payment === 'STRIPE'
+        ) {
+          totalCreditCard += fare;
+          standardizedPayment = 'CREDIT_CARD';
+        } else if (
+          payment === 'ACCOUNT' ||
+          payment === 'CUSTOMER_ACCOUNT'
+        ) {
+          totalAccount += fare;
+          standardizedPayment = 'CUSTOMER_ACCOUNT';
+        } else {
+          totalCreditCard += fare;
+          standardizedPayment = 'CREDIT_CARD';
+        }
+
+        const driverShare = Number(
+          (fare * (driverSharePercentage / 100)).toFixed(2),
+        );
+        const companyCommission = Number(
+          (fare * (commissionPercentage / 100)).toFixed(2),
+        );
+
+        return {
+          _id: ride._id,
+          tripNumber: ride.tripNumber || 'N/A',
+          completedAt:
+            ride.rideCompleteDateTime ||
+            ride.createdAt ||
+            ride.ridePaymentDateTime,
+          customerName: ride.customerName || 'N/A',
+          customerNumber: ride.customerNumber || 'N/A',
+          zone: ride.selectedZone || 'N/A',
+          fare,
+          paymentType: standardizedPayment,
+          driverShare,
+          companyCommission,
+          rideStatus: ride.rideStatus || 'COMPLETED',
+        };
+      });
+
+      totalFares = Number(totalFares.toFixed(2));
+      totalCash = Number(totalCash.toFixed(2));
+      totalCreditCard = Number(totalCreditCard.toFixed(2));
+      totalAccount = Number(totalAccount.toFixed(2));
+
+      const driverTotalEarnings = Number(
+        (totalFares * (driverSharePercentage / 100)).toFixed(2),
+      );
+      const companyTotalCommission = Number(
+        (totalFares * (commissionPercentage / 100)).toFixed(2),
+      );
+
+      // 1. Driver collected cash -> Driver owes company commission on cash trips
+      const companyShareOfCash = Number(
+        (totalCash * (commissionPercentage / 100)).toFixed(2),
+      );
+
+      // 2. Company collected non-cash (Credit Card + Customer Account) -> Company owes driver share
+      const nonCashTotal = Number((totalCreditCard + totalAccount).toFixed(2));
+      const driverShareOfNonCash = Number(
+        (nonCashTotal * (driverSharePercentage / 100)).toFixed(2),
+      );
+
+      // Net Balance = (Company Share of Cash) - (Driver Share of Non-Cash)
+      const netBalance = Number(
+        (companyShareOfCash - driverShareOfNonCash).toFixed(2),
+      );
+
+      let settlementStatus = 'SETTLED';
+      let amountDriverOwesCompany = 0;
+      let amountCompanyOwesDriver = 0;
+      let summaryText = 'Accounts are fully settled ($0.00)';
+
+      if (netBalance > 0) {
+        settlementStatus = 'DRIVER_OWES_COMPANY';
+        amountDriverOwesCompany = netBalance;
+        summaryText = `Driver owes company $${netBalance.toFixed(2)}`;
+      } else if (netBalance < 0) {
+        settlementStatus = 'COMPANY_OWES_DRIVER';
+        amountCompanyOwesDriver = Number(Math.abs(netBalance).toFixed(2));
+        summaryText = `Company owes driver $${amountCompanyOwesDriver.toFixed(2)}`;
+      }
+
+      const page = parseInt(query.page) || 1;
+      const limit = parseInt(query.limit) || 50;
+      const skip = (page - 1) * limit;
+      const paginatedTrips = trips.slice(skip, skip + limit);
+
+      return new ApiResponse(
+        200,
+        {
+          driver: {
+            _id: driver._id,
+            driverId: driver.driverId,
+            driverName: driver.driverName,
+            mobileNumber: driver.mobileNumber,
+            commissionPercentage,
+            driverSharePercentage,
+          },
+          period: {
+            fromDate: query.fromDate || null,
+            toDate: query.toDate || null,
+            filterApplied: Boolean(startDate || endDate),
+          },
+          financialTotals: {
+            totalTripsCount: trips.length,
+            totalFares,
+            totalCash,
+            totalCreditCard,
+            totalAccount,
+            commissionPercentage,
+            driverSharePercentage,
+            driverTotalEarnings,
+            companyTotalCommission,
+          },
+          settlement: {
+            cashCollectedByDriver: totalCash,
+            companyShareOfCash,
+            nonCashCollectedByCompany: nonCashTotal,
+            driverShareOfNonCash,
+            netBalance,
+            settlementStatus,
+            amountDriverOwesCompany,
+            amountCompanyOwesDriver,
+            summaryText,
+          },
+          trips: paginatedTrips,
+          pagination: {
+            total: trips.length,
+            page,
+            limit,
+            totalPages: Math.ceil(trips.length / limit) || 1,
+          },
+        },
+        'Driver earnings report fetched successfully',
+      );
+    } catch (error) {
+      console.log(`Error while fetching driver earnings report:`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async exportDriverEarningsRange(
+    driverIdentifier: string,
+    query: any,
+    res: any,
+  ) {
+    try {
+      const reportRes = await this.getDriverEarningsRange(driverIdentifier, {
+        ...query,
+        page: 1,
+        limit: 100000,
+      });
+
+      if (reportRes.statusCode !== 200) {
+        res.setHeader('Content-Type', 'application/json');
+        return res.status(reportRes.statusCode).json(reportRes);
+      }
+
+      const data = reportRes.data;
+      const driver = data.driver;
+      const totals = data.financialTotals;
+      const settlement = data.settlement;
+      const trips = data.trips || [];
+
+      function escapeCsv(val: any) {
+        const str = String(val ?? '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }
+
+      const lines: string[] = [];
+      lines.push('DRIVER EARNINGS & SETTLEMENT REPORT');
+      lines.push(`Driver Name,${escapeCsv(driver.driverName)}`);
+      lines.push(`Driver ID,${escapeCsv(driver.driverId)}`);
+      lines.push(`Driver Phone,${escapeCsv(driver.mobileNumber)}`);
+      lines.push(`Period From,${escapeCsv(data.period.fromDate || 'All Time')}`);
+      lines.push(`Period To,${escapeCsv(data.period.toDate || 'Present')}`);
+      lines.push(`Commission Rate,${driver.commissionPercentage}%`);
+      lines.push(`Driver Share Rate,${driver.driverSharePercentage}%`);
+      lines.push('');
+      lines.push('FINANCIAL SUMMARY');
+      lines.push(`Total Trips,${totals.totalTripsCount}`);
+      lines.push(`Total Fares ($),${totals.totalFares.toFixed(2)}`);
+      lines.push(
+        `Total Cash Collected by Driver ($),${totals.totalCash.toFixed(2)}`,
+      );
+      lines.push(`Total Credit Card ($),${totals.totalCreditCard.toFixed(2)}`);
+      lines.push(
+        `Total Account Payments ($),${totals.totalAccount.toFixed(2)}`,
+      );
+      lines.push(
+        `Driver Total Earnings ($),${totals.driverTotalEarnings.toFixed(2)}`,
+      );
+      lines.push(
+        `Company Total Commission ($),${totals.companyTotalCommission.toFixed(2)}`,
+      );
+      lines.push('');
+      lines.push('SETTLEMENT BREAKDOWN');
+      lines.push(`Settlement Status,${settlement.settlementStatus}`);
+      lines.push(
+        `Amount Driver Owes Company ($),${settlement.amountDriverOwesCompany.toFixed(2)}`,
+      );
+      lines.push(
+        `Amount Company Owes Driver ($),${settlement.amountCompanyOwesDriver.toFixed(2)}`,
+      );
+      lines.push(`Summary,${escapeCsv(settlement.summaryText)}`);
+      lines.push('');
+      lines.push('TRIP DETAILS');
+      lines.push(
+        [
+          'Trip Number',
+          'Date / Time',
+          'Customer Name',
+          'Customer Phone',
+          'Zone',
+          'Fare ($)',
+          'Payment Type',
+          'Driver Share ($)',
+          'Company Share ($)',
+          'Status',
+        ].join(','),
+      );
+
+      for (const t of trips) {
+        lines.push(
+          [
+            escapeCsv(t.tripNumber),
+            escapeCsv(t.completedAt),
+            escapeCsv(t.customerName),
+            escapeCsv(t.customerNumber),
+            escapeCsv(t.zone),
+            escapeCsv(t.fare.toFixed(2)),
+            escapeCsv(t.paymentType),
+            escapeCsv(t.driverShare.toFixed(2)),
+            escapeCsv(t.companyCommission.toFixed(2)),
+            escapeCsv(t.rideStatus),
+          ].join(','),
+        );
+      }
+
+      const csvContent = '\uFEFF' + lines.join('\r\n');
+      const filename = `driver-earnings-${driver.driverId || driver._id}-${data.period.fromDate || 'start'}-to-${data.period.toDate || 'end'}.csv`;
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
+
+      return csvContent;
+    } catch (error) {
+      console.log(`Error while exporting driver earnings:`, error);
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json(new ApiResponse(500, {}, Msg.SERVER_ERROR));
+    }
+  }
 }
