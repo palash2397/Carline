@@ -320,7 +320,7 @@ export class DriverService {
               mobileNumber: existing.mobileNumber,
             },
           },
-          'A driver with this mobile number already exists',
+          'This phone number already exists.',
         );
       }
 
@@ -390,7 +390,7 @@ export class DriverService {
                 mobileNumber: duplicate.mobileNumber,
               },
             },
-            'Another driver with this mobile number already exists',
+            'This phone number already exists.',
           );
         }
         updateData.mobileNumber = normalizedPhone;

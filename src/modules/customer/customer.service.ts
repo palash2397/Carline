@@ -44,12 +44,49 @@ export class CustomerService {
 
       const searchFilter: any = {};
       if (query.search) {
-        searchFilter.$or = [
-          { fullName: { $regex: query.search, $options: 'i' } },
-          { email: { $regex: query.search, $options: 'i' } },
-          { mobileNumber: { $regex: query.search, $options: 'i' } },
-          { accountNumber: { $regex: query.search, $options: 'i' } },
+        const trimmed = String(query.search).trim();
+        const cleanDigits = trimmed.replace(/\D/g, '');
+        const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        const orConditions: any[] = [
+          { fullName: { $regex: escaped, $options: 'i' } },
+          { email: { $regex: escaped, $options: 'i' } },
+          { accountNumber: { $regex: escaped, $options: 'i' } },
         ];
+
+        // If numeric ID
+        const numId = Number(trimmed);
+        if (!isNaN(numId) && Number.isInteger(numId) && cleanDigits.length <= 6) {
+          orConditions.push({ customerId: numId });
+        }
+
+        // If phone digits provided (support all formats: +1, 1, dashes, parentheses, 10 digits)
+        if (cleanDigits.length >= 3) {
+          const phoneConditions = buildPhoneMatchConditions(
+            trimmed,
+            'mobileNumber',
+          );
+          orConditions.push(...phoneConditions);
+
+          // Partial regex on mobileNumber
+          orConditions.push({
+            mobileNumber: { $regex: cleanDigits, $options: 'i' },
+          });
+
+          // Last 10 digits regex
+          if (cleanDigits.length >= 10) {
+            const last10 = cleanDigits.slice(-10);
+            orConditions.push({
+              mobileNumber: { $regex: last10, $options: 'i' },
+            });
+          }
+        } else {
+          orConditions.push({
+            mobileNumber: { $regex: escaped, $options: 'i' },
+          });
+        }
+
+        searchFilter.$or = orConditions;
       }
 
       const total = await this.customerModel.countDocuments(searchFilter);
@@ -101,7 +138,20 @@ export class CustomerService {
 
   async getCustomerById(id: string) {
     try {
-      const customer = await this.customerModel.findById(id);
+      let customer: CustomerDocument | null = null;
+      if (isValidObjectId(id)) {
+        customer = await this.customerModel.findById(id);
+      }
+      if (!customer) {
+        const numId = parseInt(id) || 0;
+        const phoneConditions = buildPhoneMatchConditions(id, 'mobileNumber');
+        customer = await this.customerModel.findOne({
+          $or: [
+            ...(numId > 0 ? [{ customerId: numId }] : []),
+            ...phoneConditions,
+          ],
+        });
+      }
 
       if (!customer) {
         return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
@@ -136,7 +186,7 @@ export class CustomerService {
               mobileNumber: existing.mobileNumber,
             },
           },
-          'Customer with this phone number already exists',
+          'This phone number already exists.',
         );
       }
 
@@ -207,7 +257,7 @@ export class CustomerService {
                 mobileNumber: duplicate.mobileNumber,
               },
             },
-            'Another customer already exists with this phone number',
+            'This phone number already exists.',
           );
         }
 
