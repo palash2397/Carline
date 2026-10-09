@@ -7,9 +7,11 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
   Delete,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { DriverService } from './driver.service';
 import {
   ApiBearerAuth,
@@ -110,6 +112,61 @@ export class DriverController {
     @Query() query: any,
   ) {
     return this.driverService.getDriverEarningsHistory(id, query);
+  }
+
+  @Get('/:id/earnings-range')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (default: 50)',
+  })
+  async getDriverEarningsRange(
+    @Param('id') id: string,
+    @Query() query: any,
+  ) {
+    return this.driverService.getDriverEarningsRange(id, query);
+  }
+
+  @Get('/:id/earnings-range/export')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  async exportDriverEarningsRange(
+    @Param('id') id: string,
+    @Query() query: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.driverService.exportDriverEarningsRange(id, query, res);
   }
 
   @Put('/earnings')

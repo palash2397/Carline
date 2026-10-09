@@ -208,6 +208,7 @@ export const Msg = {
   CUSTOMER_FETCHED: 'Customer fetched successfully',
   CUSTOMERS_FETCHED: 'Customers fetched successfully',
   CUSTOMER_ALREADY_EXISTS: 'Customer already exists',
+  PHONE_ALREADY_EXISTS: 'This phone number already exists.',
   CUSTOMER_CREDIT_ADDED: 'Customer credit added successfully',
   CUSTOMER_CREDIT_DEDUCTED: 'Customer credit deducted successfully',
   CUSTOMER_BALANCE_ADJUSTED: 'Customer balance adjusted successfully',

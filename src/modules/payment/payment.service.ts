@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import { PaymentLog, PaymentLogDocument } from './schema/payment-log.schema';
@@ -960,69 +960,58 @@ export class PaymentService {
         return new ApiResponse(400, {}, 'Amount must be a positive number');
       }
 
-      let customer: any = await this.customerModel
-        .findById(dto.customerId)
-        .catch(() => null);
+      let customer: any = null;
+      const rawId = String(dto.customerId || '').trim();
 
-      const cleanDigits = String(dto.customerId).replace(/\D/g, '');
-      const last10 =
-        cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-
-      const custPhoneDigits = (customer?.mobileNumber || '').replace(/\D/g, '');
-      const lookupDigits = cleanDigits || custPhoneDigits;
-      const lookupLast10 =
-        lookupDigits.length >= 10 ? lookupDigits.slice(-10) : lookupDigits;
-
-      const phoneConditions: any[] = [];
-      if (dto.customerId) {
-        phoneConditions.push({ mobileNumber: dto.customerId });
-      }
-      if (cleanDigits) {
-        phoneConditions.push({ mobileNumber: cleanDigits });
-      }
-      if (lookupLast10) {
-        phoneConditions.push({ mobileNumber: lookupLast10 });
-        phoneConditions.push({
-          mobileNumber: { $regex: lookupLast10, $options: 'i' },
-        });
+      if (isValidObjectId(rawId)) {
+        customer = await this.customerModel.findById(rawId).catch(() => null);
       }
 
-      if (customer && !customer.usaepayCustomerId && lookupLast10) {
-        const vaultCustomer = await this.customerModel.findOne({
-          mobileNumber: { $regex: lookupLast10, $options: 'i' },
-          usaepayCustomerId: { $exists: true, $ne: '' },
-        });
-        if (vaultCustomer) {
-          customer.usaepayCustomerId = vaultCustomer.usaepayCustomerId;
-          customer.cardLast4 = customer.cardLast4 || vaultCustomer.cardLast4;
-          customer.cardBrand = customer.cardBrand || vaultCustomer.cardBrand;
-          await customer.save().catch(() => null);
+      if (!customer) {
+        const numId = Number(rawId);
+        if (!isNaN(numId) && numId > 0 && !rawId.startsWith('+')) {
+          customer = await this.customerModel
+            .findOne({ customerId: numId })
+            .catch(() => null);
         }
       }
 
       if (!customer) {
-        customer =
-          (await this.customerModel.findOne({
-            $or: [
-              ...phoneConditions,
-              ...(Number(dto.customerId)
-                ? [{ customerId: Number(dto.customerId) }]
-                : []),
-            ],
-            usaepayCustomerId: { $exists: true, $ne: '' },
-          })) ||
-          (await this.customerModel.findOne({
-            $or: [
-              ...phoneConditions,
-              ...(Number(dto.customerId)
-                ? [{ customerId: Number(dto.customerId) }]
-                : []),
-            ],
-          }));
+        const cleanDigits = rawId.replace(/\D/g, '');
+        const last10 =
+          cleanDigits.length >= 7 ? cleanDigits.slice(-10) : cleanDigits;
+        if (last10) {
+          customer = await this.customerModel
+            .findOne({
+              $or: [
+                { mobileNumber: rawId },
+                { mobileNumber: { $regex: last10, $options: 'i' } },
+              ],
+            })
+            .catch(() => null);
+        }
       }
 
       if (!customer) {
         return new ApiResponse(404, {}, Msg.CUSTOMER_NOT_FOUND);
+      }
+
+      if (!customer.usaepayCustomerId) {
+        const custPhoneDigits = (customer.mobileNumber || '').replace(/\D/g, '');
+        const last10 =
+          custPhoneDigits.length >= 7 ? custPhoneDigits.slice(-10) : custPhoneDigits;
+        if (last10) {
+          const vaultCustomer = await this.customerModel.findOne({
+            mobileNumber: { $regex: last10, $options: 'i' },
+            usaepayCustomerId: { $exists: true, $ne: '' },
+          });
+          if (vaultCustomer) {
+            customer.usaepayCustomerId = vaultCustomer.usaepayCustomerId;
+            customer.cardLast4 = customer.cardLast4 || vaultCustomer.cardLast4;
+            customer.cardBrand = customer.cardBrand || vaultCustomer.cardBrand;
+            await customer.save().catch(() => null);
+          }
+        }
       }
 
       if (!customer.usaepayCustomerId) {
@@ -1097,6 +1086,29 @@ export class PaymentService {
       customer.credit = Number(((customer.credit || 0) + numAmount).toFixed(2));
       await customer.save();
 
+      // Synchronize all duplicate records sharing the same phone digits
+      const cleanPhone = (customer.mobileNumber || '').replace(/\D/g, '');
+      const last10 =
+        cleanPhone.length >= 7 ? cleanPhone.slice(-10) : cleanPhone;
+      if (last10) {
+        await this.customerModel.updateMany(
+          {
+            _id: { $ne: customer._id },
+            mobileNumber: { $regex: last10, $options: 'i' },
+          },
+          {
+            $set: {
+              credit: customer.credit,
+              ...(customer.usaepayCustomerId
+                ? { usaepayCustomerId: customer.usaepayCustomerId }
+                : {}),
+              ...(customer.cardLast4 ? { cardLast4: customer.cardLast4 } : {}),
+              ...(customer.cardBrand ? { cardBrand: customer.cardBrand } : {}),
+            },
+          },
+        );
+      }
+
       return new ApiResponse(
         200,
         {
@@ -1108,6 +1120,8 @@ export class PaymentService {
           amountFunded: numAmount,
           transactionId,
           authCode,
+          cardLast4: customer.cardLast4,
+          cardBrand: customer.cardBrand,
         },
         'Customer prepaid credit funded successfully from card on file',
       );

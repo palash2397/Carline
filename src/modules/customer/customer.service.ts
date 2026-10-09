@@ -44,12 +44,49 @@ export class CustomerService {
 
       const searchFilter: any = {};
       if (query.search) {
-        searchFilter.$or = [
-          { fullName: { $regex: query.search, $options: 'i' } },
-          { email: { $regex: query.search, $options: 'i' } },
-          { mobileNumber: { $regex: query.search, $options: 'i' } },
-          { accountNumber: { $regex: query.search, $options: 'i' } },
+        const trimmed = String(query.search).trim();
+        const cleanDigits = trimmed.replace(/\D/g, '');
+        const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        const orConditions: any[] = [
+          { fullName: { $regex: escaped, $options: 'i' } },
+          { email: { $regex: escaped, $options: 'i' } },
+          { accountNumber: { $regex: escaped, $options: 'i' } },
         ];
+
+        // If numeric ID
+        const numId = Number(trimmed);
+        if (!isNaN(numId) && Number.isInteger(numId) && cleanDigits.length <= 6) {
+          orConditions.push({ customerId: numId });
+        }
+
+        // If phone digits provided (support all formats: +1, 1, dashes, parentheses, 10 digits)
+        if (cleanDigits.length >= 3) {
+          const phoneConditions = buildPhoneMatchConditions(
+            trimmed,
+            'mobileNumber',
+          );
+          orConditions.push(...phoneConditions);
+
+          // Partial regex on mobileNumber
+          orConditions.push({
+            mobileNumber: { $regex: cleanDigits, $options: 'i' },
+          });
+
+          // Last 10 digits regex
+          if (cleanDigits.length >= 10) {
+            const last10 = cleanDigits.slice(-10);
+            orConditions.push({
+              mobileNumber: { $regex: last10, $options: 'i' },
+            });
+          }
+        } else {
+          orConditions.push({
+            mobileNumber: { $regex: escaped, $options: 'i' },
+          });
+        }
+
+        searchFilter.$or = orConditions;
       }
 
       const total = await this.customerModel.countDocuments(searchFilter);
@@ -101,7 +138,20 @@ export class CustomerService {
 
   async getCustomerById(id: string) {
     try {
-      const customer = await this.customerModel.findById(id);
+      let customer: CustomerDocument | null = null;
+      if (isValidObjectId(id)) {
+        customer = await this.customerModel.findById(id);
+      }
+      if (!customer) {
+        const numId = parseInt(id) || 0;
+        const phoneConditions = buildPhoneMatchConditions(id, 'mobileNumber');
+        customer = await this.customerModel.findOne({
+          $or: [
+            ...(numId > 0 ? [{ customerId: numId }] : []),
+            ...phoneConditions,
+          ],
+        });
+      }
 
       if (!customer) {
         return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
@@ -136,7 +186,7 @@ export class CustomerService {
               mobileNumber: existing.mobileNumber,
             },
           },
-          'Customer with this phone number already exists',
+          'This phone number already exists.',
         );
       }
 
@@ -207,7 +257,7 @@ export class CustomerService {
                 mobileNumber: duplicate.mobileNumber,
               },
             },
-            'Another customer already exists with this phone number',
+            'This phone number already exists.',
           );
         }
 
@@ -299,10 +349,15 @@ export class CustomerService {
   }
 
   async getAdminDetails(adminUser?: any) {
+    const rawRole = adminUser?.role || adminUser?.roles || 'ADMIN';
+    const roleStr = Array.isArray(rawRole)
+      ? rawRole[0] || 'ADMIN'
+      : String(rawRole || 'ADMIN');
+
     const adminDetails = {
       userId: adminUser?.id || adminUser?._id || '',
       email: adminUser?.email || '',
-      role: adminUser?.roles || adminUser?.role || 'ADMIN',
+      role: roleStr,
       name: '',
     };
 
@@ -317,7 +372,10 @@ export class CustomerService {
             `${dbUser.firstName || ''} ${dbUser.lastName || ''}`.trim();
           adminDetails.name = fullName || dbUser.email || '';
           adminDetails.email = dbUser.email || adminDetails.email;
-          adminDetails.role = dbUser.role || adminDetails.role;
+          const dbRole = dbUser.role;
+          adminDetails.role = Array.isArray(dbRole)
+            ? dbRole[0] || adminDetails.role
+            : String(dbRole || adminDetails.role);
         }
       } catch (e) {
         // ignore lookup error
@@ -388,6 +446,18 @@ export class CustomerService {
       customer.credit = newBalance;
       await customer.save();
 
+      const cleanPhone = (customer.mobileNumber || '').replace(/\D/g, '');
+      const last10Digits = cleanPhone.slice(-10);
+      if (last10Digits && last10Digits.length >= 7) {
+        await this.customerModel.updateMany(
+          {
+            _id: { $ne: customer._id },
+            mobileNumber: { $regex: last10Digits, $options: 'i' },
+          },
+          { $set: { credit: newBalance } },
+        );
+      }
+
       const adjustmentLog = await this.recordBalanceAdjustment({
         customer,
         action: BalanceAdjustmentType.ADD,
@@ -455,6 +525,18 @@ export class CustomerService {
 
       customer.credit = newBalance;
       await customer.save();
+
+      const cleanPhone = (customer.mobileNumber || '').replace(/\D/g, '');
+      const last10Digits = cleanPhone.slice(-10);
+      if (last10Digits && last10Digits.length >= 7) {
+        await this.customerModel.updateMany(
+          {
+            _id: { $ne: customer._id },
+            mobileNumber: { $regex: last10Digits, $options: 'i' },
+          },
+          { $set: { credit: newBalance } },
+        );
+      }
 
       const adjustmentLog = await this.recordBalanceAdjustment({
         customer,
@@ -576,33 +658,113 @@ export class CustomerService {
   }
 
   async fundCreditFromCard(dto: FundCustomerDto, adminUser?: any) {
+    const numAmount = Number(dto.amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      return new ApiResponse(400, {}, Msg.AMOUNT_POSITIVE_REQUIRED);
+    }
+
+    const targetCustomer = await this.findCustomerByIdOrPhone(dto.id);
+    if (!targetCustomer) {
+      return new ApiResponse(404, {}, Msg.DATA_NOT_FOUND);
+    }
+
+    // If target customer doesn't have a saved card token, inherit from any record with the same phone digits
+    if (!targetCustomer.usaepayCustomerId) {
+      const cleanDigits = (targetCustomer.mobileNumber || '').replace(/\D/g, '');
+      const last10 = cleanDigits.slice(-10);
+      if (last10 && last10.length >= 7) {
+        const vaultCustomer = await this.customerModel.findOne({
+          mobileNumber: { $regex: last10, $options: 'i' },
+          usaepayCustomerId: { $exists: true, $ne: '' },
+        });
+        if (vaultCustomer) {
+          targetCustomer.usaepayCustomerId = vaultCustomer.usaepayCustomerId;
+          targetCustomer.cardLast4 =
+            targetCustomer.cardLast4 || vaultCustomer.cardLast4;
+          targetCustomer.cardBrand =
+            targetCustomer.cardBrand || vaultCustomer.cardBrand;
+          await targetCustomer.save().catch(() => null);
+        }
+      }
+    }
+
+    const previousBalance = Number((targetCustomer.credit || 0).toFixed(2));
+    const newBalance = Number((previousBalance + numAmount).toFixed(2));
+
     const res: any = await this.paymentService.fundCustomerCreditFromVault({
-      customerId: dto.id,
-      amount: dto.amount,
+      customerId: targetCustomer._id.toString(),
+      amount: numAmount,
     });
 
     if (res?.statusCode === 200 && res?.data) {
       try {
-        const customer = await this.findCustomerByIdOrPhone(dto.id);
-        if (customer) {
-          const numAmount = Number(dto.amount);
-          const newBalance = Number(customer.credit || 0);
-          const previousBalance = Number((newBalance - numAmount).toFixed(2));
-          await this.recordBalanceAdjustment({
-            customer,
-            action: BalanceAdjustmentType.ADD,
-            amount: numAmount,
-            previousBalance,
-            newBalance,
-            reason:
-              dto.reason ||
-              `Funded via saved credit card (Auth: ${res.data.authCode || res.data.transactionId || ''})`,
-            adminUser: adminUser || {
-              name: 'Card on File (USAePay)',
-              role: 'PAYMENT_GATEWAY',
-            },
-          });
+        targetCustomer.credit = newBalance;
+        if (res.data?.cardLast4 && !targetCustomer.cardLast4) {
+          targetCustomer.cardLast4 = res.data.cardLast4;
         }
+        if (res.data?.cardBrand && !targetCustomer.cardBrand) {
+          targetCustomer.cardBrand = res.data.cardBrand;
+        }
+        await targetCustomer.save();
+
+        // Synchronize duplicate customer records sharing the same phone digits
+        const cleanPhone = (targetCustomer.mobileNumber || '').replace(/\D/g, '');
+        const last10Digits = cleanPhone.slice(-10);
+        if (last10Digits && last10Digits.length >= 7) {
+          await this.customerModel.updateMany(
+            {
+              _id: { $ne: targetCustomer._id },
+              mobileNumber: { $regex: last10Digits, $options: 'i' },
+            },
+            {
+              $set: {
+                credit: newBalance,
+                ...(targetCustomer.usaepayCustomerId
+                  ? { usaepayCustomerId: targetCustomer.usaepayCustomerId }
+                  : {}),
+                ...(targetCustomer.cardLast4
+                  ? { cardLast4: targetCustomer.cardLast4 }
+                  : {}),
+                ...(targetCustomer.cardBrand
+                  ? { cardBrand: targetCustomer.cardBrand }
+                  : {}),
+              },
+            },
+          );
+        }
+
+        const authInfo = res.data?.authCode || res.data?.transactionId || '';
+        const reasonText = dto.reason?.trim()
+          ? dto.reason.trim()
+          : `Funded via saved credit card${authInfo ? ` (Auth: ${authInfo})` : ''}`;
+
+        const adjustmentLog = await this.recordBalanceAdjustment({
+          customer: targetCustomer,
+          action: BalanceAdjustmentType.ADD,
+          amount: numAmount,
+          previousBalance,
+          newBalance,
+          reason: reasonText,
+          adminUser,
+        });
+
+        return new ApiResponse(
+          200,
+          {
+            _id: targetCustomer._id,
+            customerId: targetCustomer.customerId,
+            fullName: targetCustomer.fullName,
+            mobileNumber: targetCustomer.mobileNumber,
+            previousBalance,
+            credit: targetCustomer.credit,
+            amountAdded: numAmount,
+            transactionId: res.data?.transactionId || '',
+            authCode: res.data?.authCode || '',
+            customer: targetCustomer,
+            adjustment: adjustmentLog,
+          },
+          'Customer prepaid credit funded successfully from card on file',
+        );
       } catch (histErr) {
         console.log(`Failed to record vault funding history:`, histErr);
       }
