@@ -17,6 +17,10 @@ import { MailService } from 'src/modules/mail/mail.service';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { LoginUserDto } from './dto/login-user.dto';
+import {
+  normalizePhoneNumber,
+  buildPhoneMatchConditions,
+} from 'src/common/utils/phone-formatter.util';
 
 @Injectable()
 export class AuthService {
@@ -29,14 +33,20 @@ export class AuthService {
   async userRegister(dto: UserRegisterDto) {
     try {
       const { firstName, lastName, phoneNumber, email, password } = dto;
+      const normalizedPhone = normalizePhoneNumber(phoneNumber) || phoneNumber;
+      const normalizedEmail = (email || '').toLowerCase().trim();
 
+      const phoneConditions = buildPhoneMatchConditions(
+        phoneNumber,
+        'phoneNumber',
+      );
       const existingUser = await this.userModel.findOne({
-        $or: [{ email }, { phoneNumber }],
+        $or: [{ email: normalizedEmail }, ...phoneConditions],
       });
       if (existingUser) {
-        if (existingUser.email === dto.email) {
+        if (existingUser.email?.toLowerCase() === normalizedEmail) {
           return new ApiResponse(400, {}, Msg.USER_EXISTS_EMAIL);
-        } else if (existingUser.phoneNumber === dto.phoneNumber) {
+        } else {
           return new ApiResponse(400, {}, Msg.USER_EXISTS_PHONE);
         }
       }
@@ -47,8 +57,8 @@ export class AuthService {
       const newUser = await this.userModel.create({
         firstName,
         lastName,
-        phoneNumber,
-        email,
+        phoneNumber: normalizedPhone,
+        email: normalizedEmail,
         password,
         otp,
         otpExpireAt: otpExpiry,
