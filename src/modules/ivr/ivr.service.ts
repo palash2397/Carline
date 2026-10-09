@@ -17,6 +17,7 @@ import { Msg } from 'src/helpers/responseMsg';
 
 import { PricingService } from '../pricing/pricing.service';
 import { PaymentService } from '../payment/payment.service';
+import { buildPhoneMatchConditions } from 'src/common/utils/phone-formatter.util';
 
 @Injectable()
 export class IvrService {
@@ -33,24 +34,9 @@ export class IvrService {
     rawPhone: string,
   ): Promise<DriverDocument | null> {
     if (!rawPhone) return null;
-    const cleanDigits = rawPhone.replace(/\D/g, '');
-    const last10 =
-      cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-
-    const conditions: any[] = [{ mobileNumber: rawPhone }];
-    if (cleanDigits) {
-      conditions.push({ mobileNumber: cleanDigits });
-      conditions.push({
-        mobileNumber: { $regex: cleanDigits, $options: 'i' },
-      });
-    }
-    if (last10 && last10 !== cleanDigits) {
-      conditions.push({ mobileNumber: last10 });
-      conditions.push({ mobileNumber: { $regex: last10, $options: 'i' } });
-    }
-
+    const phoneConditions = buildPhoneMatchConditions(rawPhone, 'mobileNumber');
     return this.driverModel
-      .findOne({ $or: conditions })
+      .findOne({ $or: phoneConditions })
       .sort({ createdAt: -1, _id: -1 });
   }
 
@@ -1600,24 +1586,9 @@ export class IvrService {
     rawPhone: string,
   ): Promise<CustomerDocument | null> {
     if (!rawPhone) return null;
-    const cleanDigits = rawPhone.replace(/\D/g, '');
-    const last10 =
-      cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
-
-    const conditions: any[] = [{ mobileNumber: rawPhone }];
-    if (cleanDigits) {
-      conditions.push({ mobileNumber: cleanDigits });
-      conditions.push({
-        mobileNumber: { $regex: cleanDigits, $options: 'i' },
-      });
-    }
-    if (last10 && last10 !== cleanDigits) {
-      conditions.push({ mobileNumber: last10 });
-      conditions.push({ mobileNumber: { $regex: last10, $options: 'i' } });
-    }
-
+    const phoneConditions = buildPhoneMatchConditions(rawPhone, 'mobileNumber');
     return this.customerModel
-      .findOne({ $or: conditions })
+      .findOne({ $or: phoneConditions })
       .sort({ createdAt: -1, _id: -1 });
   }
 
