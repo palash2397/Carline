@@ -6,7 +6,7 @@ on:
 
 jobs:
   # -------------------------------------------------------------
-  # Stage 1: Check Backend (Build & Syntax Verification)
+  #  Check Backend 
   # -------------------------------------------------------------
   check-backend:
     name: Check Backend
@@ -27,7 +27,7 @@ jobs:
         run: NODE_OPTIONS="--max-old-space-size=1024" npm run build
 
   # -------------------------------------------------------------
-  # Stage 2: Deploy to Development (Runs on 'develop' branch push)
+  #  Deploy to Development 
   # -------------------------------------------------------------
   deploy-dev:
     name: Deploy to Development
@@ -60,12 +60,11 @@ jobs:
 
       - name: Run backend with PM2
         run: |
-          pm2 delete carline-backend || true
-          pm2 start dist/main.js --name carline-backend
+          pm2 reload carline-backend --update-env || pm2 start dist/main.js --name carline-backend
           pm2 save
 
   # -------------------------------------------------------------
-  # Stage 2: Deploy to Production (Runs on 'main' branch push)
+  #  Deploy to Production 
   # -------------------------------------------------------------
   deploy-prod:
     name: Deploy to Production
@@ -98,6 +97,5 @@ jobs:
 
       - name: Run backend with PM2
         run: |
-          pm2 delete carline-backend || true
-          pm2 start dist/main.js --name carline-backend
+          pm2 reload carline-backend --update-env || pm2 start dist/main.js --name carline-backend
           pm2 save

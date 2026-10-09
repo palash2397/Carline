@@ -384,12 +384,16 @@ export class RideService {
       const pythonUrl = process.env.PYTHON_IVR_URL || 'http://localhost:5000';
 
       try {
-        await axios.post(`${pythonUrl}/api/call-batch`, {
-          tripNumber,
-          batch1,
-          batch2,
-          batch3,
-        });
+        await axios.post(
+          `${pythonUrl}/api/call-batch`,
+          {
+            tripNumber,
+            batch1,
+            batch2,
+            batch3,
+          },
+          { timeout: 5000 },
+        );
       } catch (err) {
         console.error('Failed to contact Python IVR system', err.message);
       }

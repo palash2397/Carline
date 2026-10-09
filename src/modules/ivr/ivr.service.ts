@@ -1750,9 +1750,14 @@ export class IvrService {
   private async cancelOtherCalls(tripNumber: string) {
     const pythonUrl = process.env.PYTHON_IVR_URL || 'http://localhost:5000';
     try {
-      await axios.post(`${pythonUrl}/api/cancel-calls`, { tripNumber });
+      await axios.post(
+        `${pythonUrl}/api/cancel-calls`,
+        { tripNumber },
+        { timeout: 3000 },
+      );
     } catch (err) {
-      console.log('Failed to notify Python to cancel calls', err.message);
+      // Python IVR handles closing competing offers internally upon SAY_ACCEPTED.
+      // Timeout prevents event-loop hanging when endpoint is not configured.
     }
   }
 }
