@@ -50,7 +50,28 @@ export class RideController {
     name: 'search',
     required: false,
     type: String,
-    description: 'Search term to filter results',
+    description: 'Search term to filter results by trip number, customer, or driver',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [
+      'PENDING',
+      'ACCEPTED',
+      'STARTED',
+      'PAYMENT_PENDING',
+      'IN_PROGRESS',
+      'COMPLETED',
+      'CANCELLED',
+      'ONGOING',
+    ],
+    description: 'Filter rides by status (B5)',
+  })
+  @ApiQuery({
+    name: 'queueName',
+    required: false,
+    enum: ['LOCAL', 'LONG_DISTANCE', 'BOTH'],
+    description: 'Filter rides by queue (B5)',
   })
   @ApiQuery({
     name: 'driverId',
@@ -63,6 +84,12 @@ export class RideController {
     required: false,
     type: String,
     description: 'Filter rides by Customer ID or phone number',
+  })
+  @ApiQuery({
+    name: 'includeCounts',
+    required: false,
+    type: Boolean,
+    description: 'Set true to include live operational KPI counts in the response',
   })
   async getRides(@Query() query: any) {
     return this.rideService.getRides(query);

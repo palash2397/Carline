@@ -36,4 +36,14 @@ export class SocketService {
 
     this.server.to(`ride:${rideId}`).emit(event, data);
   }
+
+  emitToAll(event: string, data: any) {
+    if (!this.server) return;
+    this.server.emit(event, data);
+  }
+
+  emitToDashboard(data: any) {
+    if (!this.server) return;
+    this.server.emit('dashboard:live-update', data);
+  }
 }

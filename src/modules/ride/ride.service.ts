@@ -182,7 +182,83 @@ export class RideService {
         }
       }
 
-      // 3. General search filter (maintains exact backwards compatibility)
+      // 3. Status filter (B5)
+      const statusParam = query.status || query.rideStatus;
+      if (statusParam) {
+        const statusUpper = String(statusParam).trim().toUpperCase();
+        if (statusUpper === 'PENDING' || statusUpper === 'WAITING') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.PENDING, 'PENDING'] },
+          });
+        } else if (statusUpper === 'ACCEPTED') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.ACCEPTED, 'ACCEPTED'] },
+          });
+        } else if (statusUpper === 'STARTED') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.STARTED, 'STARTED'] },
+          });
+        } else if (statusUpper === 'PAYMENT_PENDING') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.PAYMENT_PENDING, 'PAYMENT_PENDING'] },
+          });
+        } else if (statusUpper === 'IN_PROGRESS') {
+          andFilters.push({
+            rideStatus: {
+              $in: [
+                RideStatus.STARTED,
+                RideStatus.PAYMENT_PENDING,
+                'STARTED',
+                'PAYMENT_PENDING',
+              ],
+            },
+          });
+        } else if (statusUpper === 'ONGOING') {
+          andFilters.push({
+            rideStatus: {
+              $in: [
+                RideStatus.ACCEPTED,
+                RideStatus.STARTED,
+                RideStatus.PAYMENT_PENDING,
+                'ACCEPTED',
+                'STARTED',
+                'PAYMENT_PENDING',
+              ],
+            },
+          });
+        } else if (statusUpper === 'COMPLETED') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
+          });
+        } else if (statusUpper === 'CANCELLED') {
+          andFilters.push({
+            rideStatus: { $in: [RideStatus.CANCELLED, 'CANCELLED'] },
+          });
+        }
+      }
+
+      // 4. Queue / Direction filter (B5)
+      const queueParam = query.queueName || query.queueType || query.queue;
+      if (queueParam) {
+        const queueUpper = String(queueParam).trim().toUpperCase();
+        if (queueUpper === 'LOCAL' || queueUpper === '1') {
+          andFilters.push({
+            $or: [
+              { queueName: { $in: ['LOCAL', 'LOCAL_RIDES', '1'] } },
+              { customerSelectOption: '1' },
+            ],
+          });
+        } else if (queueUpper === 'LONG_DISTANCE' || queueUpper === '2') {
+          andFilters.push({
+            $or: [
+              { queueName: { $in: ['LONG_DISTANCE', 'LONG_DISTANCE_RIDE', '2'] } },
+              { customerSelectOption: '2' },
+            ],
+          });
+        }
+      }
+
+      // 5. General search filter (maintains exact backwards compatibility)
       if (query.search) {
         andFilters.push({
           $or: [
@@ -200,14 +276,94 @@ export class RideService {
             ? andFilters[0]
             : {};
 
-      const total = await this.rideModel.countDocuments(searchFilter);
-      const rawData = await this.rideModel
-        .find(searchFilter)
-        .sort({ createdAt: -1, _id: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec();
+      // Concurrently calculate live operational counts
+      const ongoingStatuses = [
+        RideStatus.ACCEPTED,
+        RideStatus.STARTED,
+        RideStatus.PAYMENT_PENDING,
+        'ACCEPTED',
+        'STARTED',
+        'PAYMENT_PENDING',
+      ];
+
+      const liveCountsPromise = (async () => {
+        const [
+          ongoingLocal,
+          ongoingLong,
+          totalOngoing,
+          waitingForDriver,
+          accepted,
+          inProgress,
+          completed,
+          cancelled,
+          totalRides,
+        ] = await Promise.all([
+          this.rideModel.countDocuments({
+            rideStatus: { $in: ongoingStatuses },
+            $or: [
+              { queueName: { $in: ['LOCAL', 'LOCAL_RIDES', '1'] } },
+              { customerSelectOption: '1' },
+            ],
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: ongoingStatuses },
+            $or: [
+              { queueName: { $in: ['LONG_DISTANCE', 'LONG_DISTANCE_RIDE', '2'] } },
+              { customerSelectOption: '2' },
+            ],
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: ongoingStatuses },
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: [RideStatus.PENDING, 'PENDING'] },
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: [RideStatus.ACCEPTED, 'ACCEPTED'] },
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: {
+              $in: [
+                RideStatus.STARTED,
+                RideStatus.PAYMENT_PENDING,
+                'STARTED',
+                'PAYMENT_PENDING',
+              ],
+            },
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
+          }),
+          this.rideModel.countDocuments({
+            rideStatus: { $in: [RideStatus.CANCELLED, 'CANCELLED'] },
+          }),
+          this.rideModel.countDocuments(),
+        ]);
+
+        return {
+          ongoingLocal,
+          ongoingLongDistance: ongoingLong,
+          totalOngoing,
+          waitingForDriver,
+          accepted,
+          inProgress,
+          completed,
+          cancelled,
+          totalRides,
+        };
+      })();
+
+      const [total, rawData, liveCounts] = await Promise.all([
+        this.rideModel.countDocuments(searchFilter),
+        this.rideModel
+          .find(searchFilter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .exec(),
+        liveCountsPromise,
+      ]);
 
       const data = rawData.map((ride: any) => ({
         ...ride,
@@ -218,7 +374,14 @@ export class RideService {
 
       return new ApiResponse(
         200,
-        { data, total, page, limit },
+        {
+          data,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+          liveCounts,
+        },
         Msg.DATA_FETCHED,
       );
     } catch (error) {

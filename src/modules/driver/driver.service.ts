@@ -196,7 +196,9 @@ export class DriverService {
       const limit = parseInt(query.limit) || 10;
       const skip = (page - 1) * limit;
 
-      const searchFilter: any = {};
+      const andFilters: any[] = [];
+
+      // 1. Search filter
       if (query.search) {
         const trimmed = String(query.search).trim();
         const cleanDigits = trimmed.replace(/\D/g, '');
@@ -213,20 +215,17 @@ export class DriverService {
           orConditions.push({ driverId: numId });
         }
 
-        // If phone digits provided (support all formats: +1, 1, dashes, parentheses, 10 digits)
+        // If phone digits provided
         if (cleanDigits.length >= 3) {
           const phoneConditions = buildPhoneMatchConditions(
             trimmed,
             'mobileNumber',
           );
           orConditions.push(...phoneConditions);
-
-          // Direct partial regex on mobileNumber
           orConditions.push({
             mobileNumber: { $regex: cleanDigits, $options: 'i' },
           });
 
-          // Last 10 digits regex
           if (cleanDigits.length >= 10) {
             const last10 = cleanDigits.slice(-10);
             orConditions.push({
@@ -239,14 +238,133 @@ export class DriverService {
           });
         }
 
-        searchFilter.$or = orConditions;
+        andFilters.push({ $or: orConditions });
       }
 
+      // 2. Batch filter
       if (query.batch) {
-        searchFilter.batch = parseInt(query.batch);
+        andFilters.push({ batch: parseInt(query.batch) });
       }
 
-      const [total, data] = await Promise.all([
+      const loggedInCond = {
+        $or: [{ isLoggedIn: true }, { loginLogout: 'LOGIN' }],
+      };
+
+      // 3. Operational Status filter (B5)
+      if (query.status) {
+        const statusUpper = String(query.status).trim().toUpperCase();
+        if (statusUpper === 'AVAILABLE') {
+          andFilters.push({
+            ...loggedInCond,
+            isAvailable: true,
+          });
+        } else if (statusUpper === 'ON_TRIP') {
+          andFilters.push({
+            $or: [
+              { activeRideId: { $exists: true, $ne: null, $nin: ['', 'null'] } },
+              { ongoingRides: 'YES' },
+            ],
+          });
+        } else if (statusUpper === 'OFFLINE') {
+          andFilters.push({
+            $and: [
+              { isLoggedIn: { $ne: true } },
+              { loginLogout: { $ne: 'LOGIN' } },
+            ],
+          });
+        } else if (statusUpper === 'SIGNED_IN') {
+          andFilters.push(loggedInCond);
+        }
+      }
+
+      // 4. Queue filter (B5)
+      if (query.queueType) {
+        const queueUpper = String(query.queueType).trim().toUpperCase();
+        if (queueUpper === 'LOCAL') {
+          andFilters.push({
+            $or: [{ queueType: 'LOCAL' }, { assignQueue: 'LOCAL' }],
+          });
+        } else if (queueUpper === 'LONG_DISTANCE') {
+          andFilters.push({
+            $or: [{ queueType: 'LONG_DISTANCE' }, { assignQueue: 'LONG_DISTANCE' }],
+          });
+        } else if (queueUpper === 'BOTH') {
+          andFilters.push({
+            $or: [
+              { queueType: { $in: ['BOTH', 'ALL', 'All_Rides'] } },
+              { assignQueue: { $in: ['BOTH', 'ALL', 'All_Rides'] } },
+              { queueType: { $exists: false } },
+              { queueType: null },
+              { queueType: '' },
+            ],
+          });
+        }
+      }
+
+      const searchFilter: any =
+        andFilters.length > 1
+          ? { $and: andFilters }
+          : andFilters.length === 1
+            ? andFilters[0]
+            : {};
+
+      // Calculate live counts concurrently with main query
+      const liveCountsPromise = (async () => {
+        const [
+          signedInLocal,
+          signedInLong,
+          signedInBoth,
+          available,
+          onTrip,
+          totalDrivers,
+        ] = await Promise.all([
+          this.driverModel.countDocuments({
+            ...loggedInCond,
+            $or: [{ queueType: 'LOCAL' }, { assignQueue: 'LOCAL' }],
+          }),
+          this.driverModel.countDocuments({
+            ...loggedInCond,
+            $or: [{ queueType: 'LONG_DISTANCE' }, { assignQueue: 'LONG_DISTANCE' }],
+          }),
+          this.driverModel.countDocuments({
+            ...loggedInCond,
+            $or: [
+              { queueType: { $in: ['BOTH', 'ALL', 'All_Rides'] } },
+              { assignQueue: { $in: ['BOTH', 'ALL', 'All_Rides'] } },
+              { queueType: { $exists: false } },
+              { queueType: null },
+              { queueType: '' },
+            ],
+          }),
+          this.driverModel.countDocuments({
+            ...loggedInCond,
+            isAvailable: true,
+          }),
+          this.driverModel.countDocuments({
+            $or: [
+              { activeRideId: { $exists: true, $ne: null, $nin: ['', 'null'] } },
+              { ongoingRides: 'YES' },
+            ],
+          }),
+          this.driverModel.countDocuments(),
+        ]);
+
+        const totalSignedIn = await this.driverModel.countDocuments(loggedInCond);
+        const offline = Math.max(0, totalDrivers - totalSignedIn);
+
+        return {
+          signedInLocal,
+          signedInLongDistance: signedInLong,
+          signedInBoth,
+          totalSignedIn,
+          available,
+          onTrip,
+          offline,
+          totalDrivers,
+        };
+      })();
+
+      const [total, data, liveCounts] = await Promise.all([
         this.driverModel.countDocuments(searchFilter),
         this.driverModel
           .find(searchFilter)
@@ -255,7 +373,31 @@ export class DriverService {
           .limit(limit)
           .lean()
           .exec(),
+        liveCountsPromise,
       ]);
+
+      // Batch-fetch active rides to prevent N+1 queries
+      const activeRideIds: string[] = [];
+      for (const d of data) {
+        if (d.activeRideId && isValidObjectId(d.activeRideId)) {
+          activeRideIds.push(d.activeRideId.toString());
+        }
+      }
+
+      const activeRidesMap = new Map<string, any>();
+      if (activeRideIds.length > 0) {
+        const foundRides = await this.rideModel
+          .find({ _id: { $in: activeRideIds } })
+          .select(
+            '_id tripNumber customerName customerNumber queueName selectedZone rideAmount rideStatus rideStartDateTime',
+          )
+          .lean()
+          .exec();
+
+        for (const r of foundRides) {
+          activeRidesMap.set(r._id.toString(), r);
+        }
+      }
 
       const formattedData = data.map((d: any) => {
         const withCash =
@@ -271,8 +413,37 @@ export class DriverService {
             ? Number(d.totalEarnings)
             : Number((withCash + withoutCash).toFixed(2));
 
+        const isLoggedIn = d.isLoggedIn === true || d.loginLogout === 'LOGIN';
+        let currentTrip: any = null;
+        if (d.activeRideId && activeRidesMap.has(d.activeRideId.toString())) {
+          currentTrip = activeRidesMap.get(d.activeRideId.toString());
+        }
+
+        const operationalStatus = !isLoggedIn
+          ? 'OFFLINE'
+          : currentTrip || d.ongoingRides === 'YES'
+            ? 'ON_TRIP'
+            : d.isAvailable
+              ? 'AVAILABLE'
+              : 'BUSY';
+
         return {
           ...d,
+          isLoggedIn,
+          liveStatus: operationalStatus,
+          operationalStatus,
+          currentTrip: currentTrip
+            ? {
+                tripNumber: currentTrip.tripNumber,
+                customerName: currentTrip.customerName,
+                customerNumber: currentTrip.customerNumber,
+                queueName: currentTrip.queueName,
+                selectedZone: currentTrip.selectedZone,
+                rideAmount: currentTrip.rideAmount,
+                rideStatus: currentTrip.rideStatus,
+                rideStartDateTime: currentTrip.rideStartDateTime,
+              }
+            : null,
           earningsWithCash: withCash,
           earningsWithoutCash: withoutCash,
           totalEarnings: totalEarn,
@@ -280,7 +451,7 @@ export class DriverService {
             earningsWithCash: withCash,
             earningsWithoutCash: withoutCash,
             totalEarnings: totalEarn,
-            ongoingRides: d.ongoingRides || 'NO',
+            ongoingRides: d.ongoingRides || (currentTrip ? 'YES' : 'NO'),
             lastTripTaken: d.lastTripTaken || null,
           },
         };
@@ -288,7 +459,14 @@ export class DriverService {
 
       return new ApiResponse(
         200,
-        { data: formattedData, total, page, limit },
+        {
+          data: formattedData,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+          liveCounts,
+        },
         Msg.DATA_FETCHED,
       );
     } catch (error) {
