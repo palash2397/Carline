@@ -118,6 +118,10 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 
+UserSchema.index({ role: 1, isActive: 1 });
+UserSchema.index({ email: 1 });
+UserSchema.index({ createdAt: -1 });
+
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password') || !this.password) {
     return;

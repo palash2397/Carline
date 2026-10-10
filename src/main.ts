@@ -14,17 +14,64 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { join } from 'path';
 import morgan from 'morgan';
+import * as express from 'express';
 
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 
 import constants from './constants';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
+import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
+import { RateLimiterMiddleware } from './common/middlewares/rate-limiter.middleware';
+
 const { SWAGGER, Global } = constants;
+const logger = new Logger('Bootstrap');
+
+// Catch uncaught exceptions globally to prevent silent Node process aborts
+process.on('uncaughtException', (err: Error) => {
+  console.error(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'FATAL',
+      type: 'UNCAUGHT_EXCEPTION',
+      error: err?.message,
+      stack: err?.stack,
+    }),
+  );
+});
+
+// Catch unhandled promise rejections globally
+process.on('unhandledRejection', (reason: any) => {
+  console.error(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: 'ERROR',
+      type: 'UNHANDLED_REJECTION',
+      reason: reason instanceof Error ? reason.message : reason,
+      stack: reason instanceof Error ? reason.stack : undefined,
+    }),
+  );
+});
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
 
-  // morgan for logging
+  // Body parser payload limits to prevent OOM DOS attacks
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+  // In-memory sliding window rate limiting to guard downstream services
+  const rateLimiter = new RateLimiterMiddleware();
+  app.use((req: any, res: any, next: any) => rateLimiter.use(req, res, next));
+
+  // Structured JSON access logging with X-Request-Id correlation
+  const requestLogger = new RequestLoggerMiddleware();
+  app.use((req: any, res: any, next: any) => requestLogger.use(req, res, next));
+
+  // Morgan for concise terminal dev logging
   app.use(morgan('dev'));
 
   // Serve uploaded files statically
@@ -32,7 +79,13 @@ async function bootstrap() {
     prefix: `${Global.PREFIX}/uploads`,
   });
 
-  // enable global validation for DTOs
+  // Global exception handling & sanitized JSON responses
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // 30s timeout guard to prevent socket and connection leaks under load
+  app.useGlobalInterceptors(new TimeoutInterceptor(30000));
+
+  // Enable global validation for DTOs
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -44,7 +97,7 @@ async function bootstrap() {
     }),
   );
 
-  //  cors
+  // CORS
   app.enableCors({
     origin: '*',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -80,8 +133,19 @@ async function bootstrap() {
     },
   });
 
+  // Graceful shutdown hooks
   app.enableShutdownHooks();
-  await app.listen(process.env.PORT ?? 4010);
-  console.log(`🚀 Carline server is running on port ${process.env.PORT}`);
+
+  const port = process.env.PORT ?? 4010;
+  const server: any = await app.listen(port);
+
+  // HTTP Keep-Alive tuning for reverse proxies (Nginx / ALB) to prevent 502 Bad Gateways
+  if (server && typeof server.keepAliveTimeout !== 'undefined') {
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
+  }
+
+  logger.log(`🚀 Carline server is running on port ${port}`);
 }
+
 bootstrap();
