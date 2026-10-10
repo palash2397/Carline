@@ -275,25 +275,39 @@ export class IvrService {
     }
 
     if (!activeRide) {
+      const driverFilter = {
+        $or: [
+          { driverId: driver._id.toString() },
+          { driverId: String(driver.driverId) },
+          { driverNumber: driver.mobileNumber },
+        ],
+      };
+
+      // Prioritize rides in progress or pending payment over newly assigned ACCEPTED rides
       activeRide = await this.rideModel
         .findOne({
-          $or: [
-            { driverId: driver._id.toString() },
-            { driverId: String(driver.driverId) },
-            { driverNumber: driver.mobileNumber },
-          ],
+          ...driverFilter,
           rideStatus: {
             $in: [
-              RideStatus.ACCEPTED,
-              RideStatus.STARTED,
               RideStatus.PAYMENT_PENDING,
-              'ACCEPTED',
-              'STARTED',
+              RideStatus.STARTED,
               'PAYMENT_PENDING',
+              'STARTED',
             ],
           },
         })
         .sort({ createdAt: -1 });
+
+      if (!activeRide) {
+        activeRide = await this.rideModel
+          .findOne({
+            ...driverFilter,
+            rideStatus: {
+              $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
+            },
+          })
+          .sort({ createdAt: -1 });
+      }
 
       if (activeRide) {
         driver.activeRideId = activeRide._id.toString();
@@ -314,7 +328,11 @@ export class IvrService {
         (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
           activeRide.paymentStatus === 'COMPLETED' ||
           activeRide.rideStatus === RideStatus.COMPLETED ||
-          activeRide.rideStatus === 'COMPLETED')
+          activeRide.rideStatus === 'COMPLETED' ||
+          activeRide.selectedZone ||
+          activeRide.rideCompleteDateTime ||
+          activeRide.rideStatus === RideStatus.PAYMENT_PENDING ||
+          activeRide.rideStatus === 'PAYMENT_PENDING')
       ) {
         return new ApiResponse(
           400,
@@ -324,7 +342,7 @@ export class IvrService {
             rideStatus: activeRide.rideStatus,
             paymentStatus: activeRide.paymentStatus,
           },
-          Msg.IVR_CANNOT_CANCEL_PAID_TRIP,
+          'Cannot cancel trip once destination zone is selected or ride has completed.',
         );
       }
 
@@ -744,22 +762,18 @@ export class IvrService {
               Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
             );
           } else if (dto.dtmfInput === '9') {
-            activeRide.rideStatus = RideStatus.CANCELLED;
-            await activeRide.save();
-            await this.cancelOtherCalls(activeRide.tripNumber);
-            driver.activeRideId = '';
-            driver.isAvailable = true;
-            driver.ongoingRides = 'NO';
-            await driver.save();
             return new ApiResponse(
               200,
               {
-                action: 'TRIP_CANCELLED',
-                tripNumber: activeRide.tripNumber,
-                workflowStage: 'CANCELLED',
-                rideStatus: 'CANCELLED',
+                action: 'PLAY_PAYMENT_MENU',
+                menu: 'PAYMENT_OPTIONS',
+                calculatedFare: activeRide.rideAmount,
+                fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                currency: 'USD',
+                message:
+                  'Trip cannot be cancelled after destination zone is confirmed. Please complete payment or collect cash.',
               },
-              Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
+              'Trip cannot be cancelled after destination zone is confirmed. Please collect cash or complete payment.',
             );
           } else if (dto.dtmfInput === '0') {
             return new ApiResponse(
@@ -1371,26 +1385,40 @@ export class IvrService {
 
       // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
       if (!ride) {
+        const driverFilter = {
+          $or: [
+            { driverId: driver._id.toString() },
+            { driverId: String(driver.driverId) },
+            { driverNumber: driver.mobileNumber },
+          ],
+          paymentStatus: { $ne: 'COMPLETED' },
+        };
+
+        // Prioritize PAYMENT_PENDING and STARTED over newly assigned ACCEPTED
         ride = await this.rideModel
           .findOne({
-            $or: [
-              { driverId: driver._id.toString() },
-              { driverId: String(driver.driverId) },
-              { driverNumber: driver.mobileNumber },
-            ],
+            ...driverFilter,
             rideStatus: {
               $in: [
-                RideStatus.ACCEPTED,
-                RideStatus.STARTED,
                 RideStatus.PAYMENT_PENDING,
-                'ACCEPTED',
-                'STARTED',
+                RideStatus.STARTED,
                 'PAYMENT_PENDING',
+                'STARTED',
               ],
             },
-            paymentStatus: { $ne: 'COMPLETED' },
           })
           .sort({ createdAt: -1 });
+
+        if (!ride) {
+          ride = await this.rideModel
+            .findOne({
+              ...driverFilter,
+              rideStatus: {
+                $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
+              },
+            })
+            .sort({ createdAt: -1 });
+        }
 
         // Auto-sync driver record if active ride is found
         if (ride) {

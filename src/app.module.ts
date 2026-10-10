@@ -18,6 +18,7 @@ import { RideModule } from './modules/ride/ride.module';
 import { IvrModule } from './modules/ivr/ivr.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     IvrModule,
     PricingModule,
     PaymentModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [],

@@ -116,3 +116,12 @@ export class Ride {
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);
+
+RideSchema.index({ tripNumber: 1 });
+RideSchema.index({ driverId: 1, rideStatus: 1 });
+RideSchema.index({ driverNumber: 1, rideStatus: 1 });
+RideSchema.index({ customerNumber: 1, createdAt: -1 });
+RideSchema.index({ rideStatus: 1, createdAt: -1 });
+RideSchema.index({ paymentStatus: 1, createdAt: -1 });
+RideSchema.index({ createdAt: -1 });
+RideSchema.index({ selectedZone: 1 });

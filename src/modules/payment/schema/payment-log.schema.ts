@@ -43,3 +43,10 @@ export class PaymentLog {
 }
 
 export const PaymentLogSchema = SchemaFactory.createForClass(PaymentLog);
+
+PaymentLogSchema.index({ tripNumber: 1 });
+PaymentLogSchema.index({ rideId: 1 });
+PaymentLogSchema.index({ customerNumber: 1 });
+PaymentLogSchema.index({ status: 1, createdAt: -1 });
+PaymentLogSchema.index({ transactionId: 1 });
+PaymentLogSchema.index({ createdAt: -1 });

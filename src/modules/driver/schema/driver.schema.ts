@@ -120,4 +120,7 @@ DriverSchema.index({ createdAt: -1 });
 DriverSchema.index({ driverId: 1 });
 DriverSchema.index({ mobileNumber: 1 });
 DriverSchema.index({ driverName: 1 });
+DriverSchema.index({ isAvailable: 1, isLoggedIn: 1, queueType: 1 });
+DriverSchema.index({ assignQueue: 1, isAvailable: 1 });
+DriverSchema.index({ activeRideId: 1 });
 
