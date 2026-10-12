@@ -328,11 +328,7 @@ export class IvrService {
         (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
           activeRide.paymentStatus === 'COMPLETED' ||
           activeRide.rideStatus === RideStatus.COMPLETED ||
-          activeRide.rideStatus === 'COMPLETED' ||
-          activeRide.selectedZone ||
-          activeRide.rideCompleteDateTime ||
-          activeRide.rideStatus === RideStatus.PAYMENT_PENDING ||
-          activeRide.rideStatus === 'PAYMENT_PENDING')
+          activeRide.rideStatus === 'COMPLETED')
       ) {
         return new ApiResponse(
           400,
@@ -342,7 +338,7 @@ export class IvrService {
             rideStatus: activeRide.rideStatus,
             paymentStatus: activeRide.paymentStatus,
           },
-          'Cannot cancel trip once destination zone is selected or ride has completed.',
+          'Cannot cancel trip once payment has already been completed.',
         );
       }
 
