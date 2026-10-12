@@ -693,12 +693,66 @@ export class RideService {
         liveCountsPromise,
       ]);
 
-      const data = rawData.map((ride: any) => ({
-        ...ride,
-        payment: ride.payment || null,
-        paymentType: ride.paymentType || null,
-        paymentStatus: ride.paymentStatus || PaymentStatus.PENDING,
-      }));
+      // Fallback: Resolve missing driverName and driverNumber for rides that have driverId
+      const missingDriverIds = Array.from(
+        new Set(
+          rawData
+            .filter((r: any) => (!r.driverName || !r.driverNumber) && r.driverId)
+            .map((r: any) => String(r.driverId).trim())
+            .filter((id: string) => Boolean(id)),
+        ),
+      );
+
+      const driverMap = new Map<string, any>();
+      if (missingDriverIds.length > 0) {
+        const idConditions: any[] = [];
+        for (const dId of missingDriverIds) {
+          if (isValidObjectId(dId)) {
+            idConditions.push({ _id: dId });
+          }
+          const num = Number(dId);
+          if (!isNaN(num)) {
+            idConditions.push({ driverId: num });
+          }
+        }
+
+        if (idConditions.length > 0) {
+          const drivers = await this.driverModel
+            .find({ $or: idConditions })
+            .select('driverName mobileNumber driverId')
+            .lean()
+            .exec();
+
+          for (const d of drivers) {
+            if (d._id) driverMap.set(d._id.toString(), d);
+            if (d.driverId !== undefined && d.driverId !== null) {
+              driverMap.set(String(d.driverId), d);
+            }
+          }
+        }
+      }
+
+      const data = rawData.map((ride: any) => {
+        let driverName = ride.driverName || '';
+        let driverNumber = ride.driverNumber || '';
+
+        if ((!driverName || !driverNumber) && ride.driverId) {
+          const matchedDriver = driverMap.get(String(ride.driverId).trim());
+          if (matchedDriver) {
+            if (!driverName) driverName = matchedDriver.driverName || '';
+            if (!driverNumber) driverNumber = matchedDriver.mobileNumber || '';
+          }
+        }
+
+        return {
+          ...ride,
+          driverName,
+          driverNumber,
+          payment: ride.payment || null,
+          paymentType: ride.paymentType || null,
+          paymentStatus: ride.paymentStatus || PaymentStatus.PENDING,
+        };
+      });
 
       return new ApiResponse(
         200,

@@ -422,6 +422,11 @@ export class IvrService {
           ) {
             activeRide.rideStatus = RideStatus.STARTED;
             activeRide.rideStartDateTime = new Date().toISOString();
+            if (driver) {
+              activeRide.driverId = driver._id.toString();
+              activeRide.driverNumber = driver.mobileNumber;
+              activeRide.driverName = driver.driverName;
+            }
             await activeRide.save();
             return new ApiResponse(
               200,
@@ -1180,6 +1185,8 @@ export class IvrService {
             $set: {
               rideStatus: RideStatus.ACCEPTED,
               driverId: driver._id.toString(),
+              driverName: driver.driverName,
+              driverNumber: driver.mobileNumber,
             },
           },
         );
@@ -1194,6 +1201,7 @@ export class IvrService {
 
         driver.activeRideId = trip._id.toString();
         driver.isAvailable = false;
+        driver.ongoingRides = 'YES';
         await driver.save();
 
         this.cancelOtherCalls(dto.tripNumber).catch(console.error);
@@ -1239,12 +1247,11 @@ export class IvrService {
     this.lastSelfHealTime = now;
 
     try {
+      // ONLY check drivers who are actively logged in, marked unavailable, AND actually have an activeRideId linked
       const stuckDrivers = await this.driverModel.find({
-        $or: [
-          { isLoggedIn: true },
-          { loginLogout: { $in: ['START', 'LOGIN'] } },
-        ],
+        isLoggedIn: true,
         isAvailable: false,
+        activeRideId: { $exists: true, $ne: null, $nin: ['', 'null'] },
       });
 
       if (!stuckDrivers || stuckDrivers.length === 0) return;
@@ -1253,51 +1260,49 @@ export class IvrService {
         .map((d) => d.activeRideId)
         .filter((id) => id && isValidObjectId(id));
 
+      if (activeRideIds.length === 0) return;
+
+      const foundRides = await this.rideModel
+        .find({ _id: { $in: activeRideIds } })
+        .select(
+          '_id tripNumber rideStatus paymentStatus rideCompleteDateTime createdAt',
+        )
+        .lean();
+
       const ridesMap = new Map<string, any>();
-      if (activeRideIds.length > 0) {
-        const foundRides = await this.rideModel
-          .find({ _id: { $in: activeRideIds } })
-          .select(
-            '_id tripNumber rideStatus paymentStatus rideCompleteDateTime createdAt',
-          )
-          .lean();
-        for (const r of foundRides) {
-          ridesMap.set(r._id.toString(), r);
-        }
+      for (const r of foundRides) {
+        ridesMap.set(r._id.toString(), r);
       }
 
       for (const driver of stuckDrivers) {
+        const linkedRide = ridesMap.get(driver.activeRideId.toString());
         let shouldFree = false;
 
-        if (!driver.activeRideId) {
+        // Ride document no longer exists
+        if (!linkedRide) {
           shouldFree = true;
+        } else if (
+          linkedRide.rideStatus === RideStatus.COMPLETED ||
+          linkedRide.rideStatus === 'COMPLETED' ||
+          linkedRide.paymentStatus === 'COMPLETED' ||
+          linkedRide.rideStatus === RideStatus.CANCELLED ||
+          linkedRide.rideStatus === 'CANCELLED'
+        ) {
+          shouldFree = true;
+        } else if (
+          linkedRide.rideStatus === RideStatus.PAYMENT_PENDING ||
+          linkedRide.rideStatus === 'PAYMENT_PENDING'
+        ) {
+          // Keep driver linked to settle payment unless abandoned > 45 minutes
+          const ageMs = now - new Date(linkedRide.createdAt).getTime();
+          if (ageMs > 45 * 60 * 1000) {
+            shouldFree = true;
+          }
         } else {
-          const linkedRide = ridesMap.get(driver.activeRideId.toString());
-          if (!linkedRide) {
+          // Stale check for active rides older than 45 minutes
+          const ageMs = now - new Date(linkedRide.createdAt).getTime();
+          if (ageMs > 45 * 60 * 1000) {
             shouldFree = true;
-          } else if (
-            linkedRide.rideStatus === RideStatus.COMPLETED ||
-            linkedRide.rideStatus === 'COMPLETED' ||
-            linkedRide.paymentStatus === 'COMPLETED' ||
-            linkedRide.rideStatus === RideStatus.CANCELLED ||
-            linkedRide.rideStatus === 'CANCELLED'
-          ) {
-            shouldFree = true;
-          } else if (
-            linkedRide.rideStatus === RideStatus.PAYMENT_PENDING ||
-            linkedRide.rideStatus === 'PAYMENT_PENDING'
-          ) {
-            // Keep driver linked to settle payment unless abandoned > 45 minutes
-            const ageMs = now - new Date(linkedRide.createdAt).getTime();
-            if (ageMs > 45 * 60 * 1000) {
-              shouldFree = true;
-            }
-          } else {
-            // Stale check for active rides older than 45 minutes
-            const ageMs = now - new Date(linkedRide.createdAt).getTime();
-            if (ageMs > 45 * 60 * 1000) {
-              shouldFree = true;
-            }
           }
         }
 
@@ -1305,12 +1310,7 @@ export class IvrService {
           driver.activeRideId = '';
           driver.isAvailable = true;
           driver.ongoingRides = 'NO';
-          if (
-            driver.loginLogout === 'START' ||
-            driver.loginLogout === 'LOGIN'
-          ) {
-            driver.isLoggedIn = true;
-          }
+          // NEVER modify driver.isLoggedIn here!
           await driver.save();
         }
       }
