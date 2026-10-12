@@ -307,8 +307,21 @@ export class IvrService {
         if (activeRide) {
           driver.activeRideId = activeRide._id.toString();
           driver.isAvailable = false;
+          driver.ongoingRides = 'YES';
+          if (!driver.isLoggedIn) {
+            driver.isLoggedIn = true;
+            driver.loginLogout = 'START';
+          }
           await driver.save();
         }
+      } else {
+        if (!driver.isLoggedIn) {
+          driver.isLoggedIn = true;
+          driver.loginLogout = 'START';
+        }
+        driver.isAvailable = false;
+        driver.ongoingRides = 'YES';
+        await driver.save();
       }
 
       // 1. Explicit Trip Cancellation check - must NEVER trigger Fare Override
@@ -399,7 +412,13 @@ export class IvrService {
             if (!activeRide.selectedZone) {
               return new ApiResponse(
                 200,
-                { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+                {
+                  action: 'PLAY_ZONE_MENU',
+                  menu: 'ZONE_SELECTION',
+                  workflowStage: 'ZONE_SELECTION',
+                  tripNumber: activeRide.tripNumber,
+                  tripId: activeRide._id,
+                },
                 Msg.IVR_PLAY_ZONE_SELECTION_MENU,
               );
             }
@@ -408,6 +427,9 @@ export class IvrService {
               {
                 action: 'PLAY_PAYMENT_MENU',
                 menu: 'PAYMENT_OPTIONS',
+                workflowStage: 'AWAITING_PAYMENT',
+                tripNumber: activeRide.tripNumber,
+                tripId: activeRide._id,
                 calculatedFare: activeRide.rideAmount,
                 selectedZone: activeRide.selectedZone,
                 currency: 'USD',
@@ -781,16 +803,36 @@ export class IvrService {
                 Msg.IVR_TRIP_CANCELLED,
               );
             } else if (dto.dtmfInput === '0') {
+              (activeRide as any).selectedZone = undefined;
+              activeRide.rideAmount = 0;
+              (activeRide as any).originalCalculatedFare = undefined;
+              await activeRide.save();
+              return new ApiResponse(
+                200,
+                {
+                  action: 'PLAY_ZONE_MENU',
+                  menu: 'ZONE_SELECTION',
+                  workflowStage: 'ZONE_SELECTION',
+                  tripNumber: activeRide.tripNumber,
+                  tripId: activeRide._id,
+                },
+                Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+              );
+            } else {
               return new ApiResponse(
                 200,
                 {
                   action: 'PLAY_PAYMENT_MENU',
                   menu: 'PAYMENT_OPTIONS',
+                  workflowStage: 'AWAITING_PAYMENT',
+                  tripNumber: activeRide.tripNumber,
+                  tripId: activeRide._id,
                   calculatedFare: activeRide.rideAmount,
                   fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                  selectedZone: activeRide.selectedZone,
                   currency: 'USD',
                 },
-                Msg.IVR_RETURNED_TO_PAYMENT_MENU,
+                Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU,
               );
             }
           }
@@ -1293,11 +1335,8 @@ export class IvrService {
           linkedRide.rideStatus === RideStatus.PAYMENT_PENDING ||
           linkedRide.rideStatus === 'PAYMENT_PENDING'
         ) {
-          // Keep driver linked to settle payment unless abandoned > 45 minutes
-          const ageMs = now - new Date(linkedRide.createdAt).getTime();
-          if (ageMs > 45 * 60 * 1000) {
-            shouldFree = true;
-          }
+          // Keep driver linked to settle payment and do NOT free driver while in PAYMENT_PENDING
+          shouldFree = false;
         } else {
           // Stale check for active rides older than 45 minutes
           const ageMs = now - new Date(linkedRide.createdAt).getTime();
@@ -1523,7 +1562,7 @@ export class IvrService {
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
 
-      // If linked ride is already completed, paid, cancelled, or stale (> 45m), finalize and reset active ride
+      // If linked ride is already completed, paid, or cancelled, finalize and reset active ride
       const isRidePaidOrCompleted =
         ride &&
         (ride.paymentStatus === PaymentStatus.COMPLETED ||
@@ -1532,9 +1571,6 @@ export class IvrService {
           ride.rideStatus === 'COMPLETED' ||
           ride.rideStatus === RideStatus.CANCELLED ||
           ride.rideStatus === 'CANCELLED' ||
-          ((ride as any)?.createdAt &&
-            Date.now() - new Date((ride as any).createdAt).getTime() >
-              45 * 60 * 1000) ||
           ![
             RideStatus.ACCEPTED,
             RideStatus.STARTED,
@@ -1584,8 +1620,17 @@ export class IvrService {
         if (driver.activeRideId) {
           driver.activeRideId = '';
           driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
           await driver.save();
         }
+      } else if (ride) {
+        if (!driver.isLoggedIn) {
+          driver.isLoggedIn = true;
+          driver.loginLogout = 'START';
+        }
+        driver.isAvailable = false;
+        driver.ongoingRides = 'YES';
+        await driver.save();
       }
 
       // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
@@ -1627,17 +1672,14 @@ export class IvrService {
 
         // Auto-sync driver record if active ride is found
         if (ride) {
-          const isRideFinishedOrStale =
+          const isRideFinishedOrCancelled =
             ride.rideStatus === RideStatus.COMPLETED ||
             ride.rideStatus === 'COMPLETED' ||
             ride.paymentStatus === 'COMPLETED' ||
             ride.rideStatus === RideStatus.CANCELLED ||
-            ride.rideStatus === 'CANCELLED' ||
-            ((ride as any)?.createdAt &&
-              Date.now() - new Date((ride as any).createdAt).getTime() >
-                45 * 60 * 1000);
+            ride.rideStatus === 'CANCELLED';
 
-          if (isRideFinishedOrStale) {
+          if (isRideFinishedOrCancelled) {
             driver.activeRideId = '';
             driver.isAvailable = true;
             driver.ongoingRides = 'NO';
@@ -1645,6 +1687,10 @@ export class IvrService {
             driver.activeRideId = ride._id.toString();
             driver.isAvailable = false;
             driver.ongoingRides = 'YES';
+            if (!driver.isLoggedIn) {
+              driver.isLoggedIn = true;
+              driver.loginLogout = 'START';
+            }
           }
           await driver.save();
         }
@@ -1810,6 +1856,14 @@ export class IvrService {
       }
 
       const hasActiveTrip = !!ride && !!activeTripData;
+      const isPendingPayment = ride?.rideStatus === RideStatus.PAYMENT_PENDING;
+
+      let topLevelMessage = Msg.IVR_DRIVER_STATUS_FETCHED;
+      if (isPendingPayment) {
+        topLevelMessage = !ride?.selectedZone
+          ? Msg.IVR_PLAY_ZONE_SELECTION_MENU
+          : Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU;
+      }
 
       return new ApiResponse(
         200,
@@ -1821,15 +1875,17 @@ export class IvrService {
           status: driver.status || 'ACTIVE',
           lockedOut: false,
           isLockedOut: false,
-          loggedIn: driver.isLoggedIn,
+          loggedIn: hasActiveTrip ? true : driver.isLoggedIn,
           serviceType: driver.queueType,
-          available: driver.isAvailable,
+          available: hasActiveTrip ? false : driver.isAvailable,
           workflowStage,
+          action: activeTripData?.action,
+          menu: activeTripData?.menu,
           activeTrip: hasActiveTrip,
           trip: hasActiveTrip ? activeTripData : completedTripData || null,
           activeTripData: activeTripData || null,
         },
-        Msg.IVR_DRIVER_STATUS_FETCHED,
+        topLevelMessage,
       );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
