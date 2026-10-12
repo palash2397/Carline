@@ -204,10 +204,17 @@ export class DriverService {
         const cleanDigits = trimmed.replace(/\D/g, '');
         const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+        const words = trimmed.split(/\s+/).filter((w) => w.length > 1);
         const orConditions: any[] = [
           { driverName: { $regex: escaped, $options: 'i' } },
           { assignQueue: { $regex: escaped, $options: 'i' } },
         ];
+        if (words.length > 1) {
+          const wordRegex = words
+            .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*');
+          orConditions.push({ driverName: { $regex: wordRegex, $options: 'i' } });
+        }
 
         // If numeric ID
         const numId = Number(trimmed);
