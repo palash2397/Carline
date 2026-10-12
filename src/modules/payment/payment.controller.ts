@@ -93,6 +93,48 @@ export class PaymentController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by trip number, customer number, transaction ID, or auth code',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['APPROVED', 'DECLINED', 'PENDING', 'FAILED', 'REFUNDED'],
+    description: 'Filter logs by payment status',
+  })
+  @ApiQuery({
+    name: 'paymentType',
+    required: false,
+    enum: ['CREDIT_CARD', 'CASH', 'CUSTOMER_ACCOUNT'],
+    description: 'Filter logs by payment method',
+  })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter logs from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter logs to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    type: String,
+    description: 'Field to sort by (default: createdAt)',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default: desc)',
+  })
   async getLogs(@Query() query: any) {
     return this.paymentService.getLogs(query);
   }

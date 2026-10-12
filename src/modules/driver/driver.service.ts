@@ -254,7 +254,10 @@ export class DriverService {
       }
 
       const loggedInCond = {
-        $or: [{ isLoggedIn: true }, { loginLogout: 'LOGIN' }],
+        $or: [
+          { isLoggedIn: true },
+          { loginLogout: { $in: ['LOGIN', 'START'] } },
+        ],
       };
 
       // 3. Operational Status filter (B5)
@@ -276,12 +279,18 @@ export class DriverService {
           andFilters.push({
             $and: [
               { isLoggedIn: { $ne: true } },
-              { loginLogout: { $ne: 'LOGIN' } },
+              { loginLogout: { $nin: ['LOGIN', 'START'] } },
             ],
           });
         } else if (statusUpper === 'SIGNED_IN') {
           andFilters.push(loggedInCond);
         }
+      }
+
+      // 3b. Service Type filter
+      if (query.serviceType) {
+        const stUpper = String(query.serviceType).trim().toUpperCase();
+        andFilters.push({ serviceType: stUpper });
       }
 
       // 4. Queue filter (B5)
@@ -371,11 +380,22 @@ export class DriverService {
         };
       })();
 
+      const sortField = query.sortBy || query.sortField || 'driverId';
+      const sortDirection: 1 | -1 =
+        String(query.sortOrder || query.sortDirection || '').toLowerCase() ===
+          'desc' || query.sortOrder === '-1' || query.sortOrder === -1
+          ? -1
+          : 1;
+      const sortQuery: any = { [sortField]: sortDirection };
+      if (sortField !== '_id') {
+        sortQuery._id = -1;
+      }
+
       const [total, data, liveCounts] = await Promise.all([
         this.driverModel.countDocuments(searchFilter),
         this.driverModel
           .find(searchFilter)
-          .sort({ createdAt: -1, _id: -1 })
+          .sort(sortQuery)
           .skip(skip)
           .limit(limit)
           .lean()
@@ -901,12 +921,15 @@ export class DriverService {
         driver = await this.driverModel.findById(driverIdentifier);
       }
       if (!driver) {
-        driver = await this.driverModel.findOne({
-          $or: [
-            { driverId: parseInt(driverIdentifier) || 0 },
-            { mobileNumber: String(driverIdentifier) },
-          ],
-        });
+        const cleanDigits = String(driverIdentifier).replace(/\D/g, '');
+        const lookupOr: any[] = [
+          { driverId: parseInt(driverIdentifier) || 0 },
+          { mobileNumber: String(driverIdentifier) },
+        ];
+        if (cleanDigits.length >= 7) {
+          lookupOr.push({ mobileNumber: { $regex: cleanDigits, $options: 'i' } });
+        }
+        driver = await this.driverModel.findOne({ $or: lookupOr });
       }
 
       if (!driver) {
@@ -926,6 +949,42 @@ export class DriverService {
 
       if (query.actionType) {
         filter.actionType = query.actionType.toUpperCase();
+      }
+
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
+      if (fromParam || toParam || singleDate) {
+        let start: Date | null = null;
+        let end: Date | null = null;
+        if (singleDate) {
+          start = new Date(singleDate);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(singleDate);
+          end.setHours(23, 59, 59, 999);
+        } else {
+          if (fromParam) {
+            const d = new Date(fromParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(0, 0, 0, 0);
+              start = d;
+            }
+          }
+          if (toParam) {
+            const d = new Date(toParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(23, 59, 59, 999);
+              end = d;
+            }
+          }
+        }
+        const dateCond: any = {};
+        if (start) dateCond.$gte = start;
+        if (end) dateCond.$lte = end;
+        if (Object.keys(dateCond).length > 0) {
+          filter.createdAt = dateCond;
+        }
       }
 
       const [total, history] = await Promise.all([
@@ -1117,6 +1176,17 @@ export class DriverService {
         driverMatchConditions.push({
           driverName: { $regex: `^${driver.driverName.trim()}$`, $options: 'i' },
         });
+        const cleanName = driver.driverName.replace(/[^\x00-\x7F]/g, '').trim();
+        const dWords = (cleanName || driver.driverName)
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
+        if (dWords.length > 1) {
+          const wRegex = dWords
+            .slice(0, 2)
+            .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*');
+          driverMatchConditions.push({ driverName: { $regex: wRegex, $options: 'i' } });
+        }
       }
 
       const rideQuery: any = {
@@ -1124,22 +1194,37 @@ export class DriverService {
         rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
       };
 
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
       let startDate: Date | null = null;
       let endDate: Date | null = null;
 
-      if (query.fromDate) {
-        const d = new Date(query.fromDate);
-        if (!isNaN(d.getTime())) {
-          d.setHours(0, 0, 0, 0);
-          startDate = d;
+      if (singleDate) {
+        const d1 = new Date(singleDate);
+        if (!isNaN(d1.getTime())) {
+          d1.setHours(0, 0, 0, 0);
+          startDate = d1;
+          const d2 = new Date(singleDate);
+          d2.setHours(23, 59, 59, 999);
+          endDate = d2;
         }
-      }
+      } else {
+        if (fromParam) {
+          const d = new Date(fromParam);
+          if (!isNaN(d.getTime())) {
+            d.setHours(0, 0, 0, 0);
+            startDate = d;
+          }
+        }
 
-      if (query.toDate) {
-        const d = new Date(query.toDate);
-        if (!isNaN(d.getTime())) {
-          d.setHours(23, 59, 59, 999);
-          endDate = d;
+        if (toParam) {
+          const d = new Date(toParam);
+          if (!isNaN(d.getTime())) {
+            d.setHours(23, 59, 59, 999);
+            endDate = d;
+          }
         }
       }
 

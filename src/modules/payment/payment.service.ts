@@ -808,21 +808,103 @@ export class PaymentService {
       const limit = parseInt(query.limit) || 10;
       const skip = (page - 1) * limit;
 
-      const total = await this.paymentLogModel.countDocuments();
+      const andFilters: any[] = [];
+
+      if (query.search) {
+        const trimmed = String(query.search).trim();
+        const cleanDigits = trimmed.replace(/\D/g, '');
+        const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        const orConditions: any[] = [
+          { tripNumber: { $regex: escaped, $options: 'i' } },
+          { customerNumber: { $regex: escaped, $options: 'i' } },
+          { transactionId: { $regex: escaped, $options: 'i' } },
+          { authCode: { $regex: escaped, $options: 'i' } },
+          { cardMasked: { $regex: escaped, $options: 'i' } },
+        ];
+
+        if (cleanDigits.length >= 4) {
+          orConditions.push({ customerNumber: { $regex: cleanDigits, $options: 'i' } });
+        }
+
+        andFilters.push({ $or: orConditions });
+      }
+
+      if (query.status) {
+        andFilters.push({ status: String(query.status).trim().toUpperCase() });
+      }
+
+      if (query.paymentType) {
+        andFilters.push({
+          paymentType: String(query.paymentType).trim().toUpperCase(),
+        });
+      }
+
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
+      if (fromParam || toParam || singleDate) {
+        let start: Date | null = null;
+        let end: Date | null = null;
+        if (singleDate) {
+          start = new Date(singleDate);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(singleDate);
+          end.setHours(23, 59, 59, 999);
+        } else {
+          if (fromParam) {
+            const d = new Date(fromParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(0, 0, 0, 0);
+              start = d;
+            }
+          }
+          if (toParam) {
+            const d = new Date(toParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(23, 59, 59, 999);
+              end = d;
+            }
+          }
+        }
+        const dateCond: any = {};
+        if (start) dateCond.$gte = start;
+        if (end) dateCond.$lte = end;
+        if (Object.keys(dateCond).length > 0) {
+          andFilters.push({ createdAt: dateCond });
+        }
+      }
+
+      const searchFilter: any =
+        andFilters.length > 1
+          ? { $and: andFilters }
+          : andFilters.length === 1
+            ? andFilters[0]
+            : {};
+
+      const sortField = query.sortBy || query.sortField || 'createdAt';
+      const sortDirection: 1 | -1 =
+        String(query.sortOrder || query.sortDirection || '').toLowerCase() ===
+          'asc' || query.sortOrder === '1' || query.sortOrder === 1
+          ? 1
+          : -1;
+      const sortQuery: any = { [sortField]: sortDirection };
+      if (sortField !== '_id') {
+        sortQuery._id = -1;
+      }
+
+      const total = await this.paymentLogModel.countDocuments(searchFilter);
       const logs = await this.paymentLogModel
-        .find()
-        .sort({ createdAt: -1, _id: -1 })
+        .find(searchFilter)
+        .sort(sortQuery)
         .skip(skip)
         .limit(limit)
         .exec();
 
-      if (!logs || logs.length === 0) {
-        return new ApiResponse(404, {}, Msg.PAYMENT_LOGS_NOT_FOUND);
-      }
-
       return new ApiResponse(
         200,
-        { logs, total, page, limit },
+        { logs: logs || [], total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
         Msg.PAYMENT_LOGS_FETCHED,
       );
     } catch (error) {

@@ -295,7 +295,11 @@ export class RideService {
           }
         }
         if (d.driverName) {
-          const dWords = d.driverName.split(/\s+/).filter((w) => w.length > 2);
+          orConditions.push({ driverName: d.driverName });
+          const cleanName = d.driverName.replace(/[^\x00-\x7F]/g, '').trim();
+          const dWords = (cleanName || d.driverName)
+            .split(/\s+/)
+            .filter((w) => w.length > 2);
           if (dWords.length > 1) {
             const wRegex = dWords
               .slice(0, 2)
@@ -320,6 +324,7 @@ export class RideService {
     if (escaped.length >= 2) {
       customerSearchOrs.push(
         { name: { $regex: escaped, $options: 'i' } },
+        { fullName: { $regex: escaped, $options: 'i' } },
         { customerName: { $regex: escaped, $options: 'i' } },
       );
     }
@@ -343,6 +348,23 @@ export class RideService {
         }
         if (c.accountNumber) {
           orConditions.push({ customerNumber: c.accountNumber });
+        }
+        const custName = (c as any).fullName || (c as any).name || (c as any).customerName;
+        if (custName) {
+          orConditions.push({
+            customerName: {
+              $regex: custName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+              $options: 'i',
+            },
+          });
+          const cWords = custName.split(/\s+/).filter((w: string) => w.length > 2);
+          if (cWords.length > 1) {
+            const wRegex = cWords
+              .slice(0, 2)
+              .map((w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+              .join('.*');
+            orConditions.push({ customerName: { $regex: wRegex, $options: 'i' } });
+          }
         }
       }
     }
@@ -457,7 +479,104 @@ export class RideService {
         }
       }
 
-      // 5. General search filter (comprehensive multi-entity match: driver, customer, phone variations, tripNumber)
+      // 5. Date range filter (supports fromDate/toDate, startDate/endDate, date)
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
+      if (fromParam || toParam || singleDate) {
+        let start: Date | null = null;
+        let end: Date | null = null;
+
+        if (singleDate) {
+          start = new Date(singleDate);
+          start.setUTCHours(0, 0, 0, 0);
+          end = new Date(singleDate);
+          end.setUTCHours(23, 59, 59, 999);
+        } else {
+          if (fromParam) {
+            const parsedStart = new Date(fromParam);
+            if (!isNaN(parsedStart.getTime())) {
+              start = parsedStart;
+              if (String(fromParam).length <= 10) {
+                start.setUTCHours(0, 0, 0, 0);
+              }
+            }
+          }
+          if (toParam) {
+            const parsedEnd = new Date(toParam);
+            if (!isNaN(parsedEnd.getTime())) {
+              end = parsedEnd;
+              if (String(toParam).length <= 10) {
+                end.setUTCHours(23, 59, 59, 999);
+              }
+            }
+          }
+        }
+
+        const dateCond: any = {};
+        if (start && !isNaN(start.getTime())) {
+          dateCond.$gte = start;
+        }
+        if (end && !isNaN(end.getTime())) {
+          dateCond.$lte = end;
+        }
+
+        if (Object.keys(dateCond).length > 0) {
+          const dateOrConditions: any[] = [{ createdAt: dateCond }];
+          const strCond: any = {};
+          if (start) strCond.$gte = start.toISOString();
+          if (end) strCond.$lte = end.toISOString();
+          dateOrConditions.push(
+            { rideStartDateTime: strCond },
+            { rideCompleteDateTime: strCond },
+          );
+          andFilters.push({ $or: dateOrConditions });
+        }
+      }
+
+      // 6. Payment Status and Payment Type filters
+      const paymentStatusParam = query.paymentStatus;
+      if (paymentStatusParam) {
+        const psUpper = String(paymentStatusParam).trim().toUpperCase();
+        andFilters.push({ paymentStatus: psUpper });
+      }
+
+      const paymentTypeParam = query.paymentType || query.payment;
+      if (paymentTypeParam) {
+        const ptUpper = String(paymentTypeParam).trim().toUpperCase();
+        if (ptUpper === 'CARD' || ptUpper === 'CREDIT_CARD') {
+          andFilters.push({
+            $or: [
+              { paymentType: { $in: ['CARD', 'CREDIT_CARD', 'STRIPE'] } },
+              { payment: { $in: ['CARD', 'CREDIT_CARD', 'STRIPE'] } },
+            ],
+          });
+        } else if (ptUpper === 'CASH') {
+          andFilters.push({
+            $or: [
+              { paymentType: 'CASH' },
+              { payment: 'CASH' },
+            ],
+          });
+        } else if (ptUpper === 'ACCOUNT' || ptUpper === 'CUSTOMER_ACCOUNT') {
+          andFilters.push({
+            $or: [
+              { paymentType: { $in: ['ACCOUNT', 'CUSTOMER_ACCOUNT'] } },
+              { payment: { $in: ['ACCOUNT', 'CUSTOMER_ACCOUNT'] } },
+            ],
+          });
+        } else {
+          andFilters.push({
+            $or: [
+              { paymentType: ptUpper },
+              { payment: ptUpper },
+            ],
+          });
+        }
+      }
+
+      // 7. General search filter (comprehensive multi-entity match: driver, customer, phone variations, tripNumber)
       if (query.search) {
         const searchConditions = await this.buildSearchConditions(
           String(query.search),
@@ -551,11 +670,22 @@ export class RideService {
         };
       })();
 
+      const sortField = query.sortBy || query.sortField || 'createdAt';
+      const sortDirection: 1 | -1 =
+        String(query.sortOrder || query.sortDirection || '').toLowerCase() ===
+          'asc' || query.sortOrder === '1' || query.sortOrder === 1
+          ? 1
+          : -1;
+      const sortQuery: any = { [sortField]: sortDirection };
+      if (sortField !== '_id') {
+        sortQuery._id = -1;
+      }
+
       const [total, rawData, liveCounts] = await Promise.all([
         this.rideModel.countDocuments(searchFilter),
         this.rideModel
           .find(searchFilter)
-          .sort({ createdAt: -1, _id: -1 })
+          .sort(sortQuery)
           .skip(skip)
           .limit(limit)
           .lean()

@@ -82,6 +82,24 @@ export class DriverController {
     type: Number,
     description: 'Filter drivers by batch number (e.g. 1, 2, 3)',
   })
+  @ApiQuery({
+    name: 'serviceType',
+    required: false,
+    enum: ['LOCAL', 'LONG_DISTANCE', 'BOTH'],
+    description: 'Filter drivers by service type',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    type: String,
+    description: 'Field to sort by (default: driverId)',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default: asc)',
+  })
   async getDrivers(@Query() query: any) {
     return this.driverService.getDrivers(query);
   }
