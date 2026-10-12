@@ -760,6 +760,43 @@ export class RideService {
         'IVR Customer',
       );
 
+      // Prevent duplicate booking if customer already has an active ride in progress
+      const cleanCustomerDigits = (dto.customerNumber || '')
+        .replace(/\D/g, '')
+        .slice(-10);
+      if (cleanCustomerDigits && cleanCustomerDigits.length >= 7) {
+        const existingActiveRide = await this.rideModel
+          .findOne({
+            customerNumber: { $regex: `${cleanCustomerDigits}$` },
+            rideStatus: {
+              $in: [
+                RideStatus.PENDING,
+                RideStatus.ACCEPTED,
+                RideStatus.STARTED,
+                RideStatus.PAYMENT_PENDING,
+                'PENDING',
+                'ACCEPTED',
+                'STARTED',
+                'PAYMENT_PENDING',
+              ],
+            },
+            createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+          })
+          .sort({ createdAt: -1 });
+
+        if (existingActiveRide) {
+          return new ApiResponse(
+            200,
+            {
+              newRide: existingActiveRide,
+              tripNumber: existingActiveRide.tripNumber,
+              isExisting: true,
+            },
+            'Customer already has an active ride in progress',
+          );
+        }
+      }
+
       const tripNumber = `TRIP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 
       const lastRide = await this.rideModel.findOne().sort({ rideId: -1 });
