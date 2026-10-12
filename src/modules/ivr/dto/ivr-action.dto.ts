@@ -68,4 +68,9 @@ export class IvrDispatchActionDto {
   @IsNotEmpty()
   @IsString()
   dtmfInput: string;
+
+  @ApiProperty({ example: '1234567890', required: false })
+  @IsOptional()
+  @IsString()
+  customerNumber?: string;
 }

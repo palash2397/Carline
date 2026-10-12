@@ -1079,6 +1079,24 @@ export class IvrService {
     // --- PRE-BOOKING DISPATCH FLOW (Using dispatchId) ---
     if (dto.dispatchId) {
       if (dto.dtmfInput === '1') {
+        const cleanDriverPhone = (driver.mobileNumber || '')
+          .replace(/\D/g, '')
+          .slice(-10);
+        const cleanCustomerPhone = (dto.customerNumber || '')
+          .replace(/\D/g, '')
+          .slice(-10);
+        if (
+          cleanDriverPhone &&
+          cleanCustomerPhone &&
+          cleanDriverPhone === cleanCustomerPhone
+        ) {
+          return new ApiResponse(
+            400,
+            { action: 'SAY_CANNOT_ACCEPT_OWN_TRIP' },
+            Msg.IVR_CANNOT_ACCEPT_OWN_TRIP,
+          );
+        }
+
         const existingLock = this.dispatchLocks.get(dto.dispatchId);
         if (existingLock) {
           if (existingLock.driverNumber === dto.driverNumber) {
@@ -1128,6 +1146,37 @@ export class IvrService {
     // --- POST-BOOKING DISPATCH FLOW (Using tripNumber) ---
     if (dto.tripNumber) {
       if (dto.dtmfInput === '1') {
+        const trip = await this.rideModel.findOne({
+          tripNumber: dto.tripNumber,
+        });
+
+        if (!trip) {
+          return new ApiResponse(
+            404,
+            { action: 'SAY_TRIP_NOT_FOUND' },
+            Msg.RIDE_NOT_FOUND,
+          );
+        }
+
+        const cleanDriverPhone = (driver.mobileNumber || '')
+          .replace(/\D/g, '')
+          .slice(-10);
+        const cleanCustomerPhone = (trip.customerNumber || '')
+          .replace(/\D/g, '')
+          .slice(-10);
+
+        if (
+          cleanDriverPhone &&
+          cleanCustomerPhone &&
+          cleanDriverPhone === cleanCustomerPhone
+        ) {
+          return new ApiResponse(
+            400,
+            { action: 'SAY_CANNOT_ACCEPT_OWN_TRIP' },
+            Msg.IVR_CANNOT_ACCEPT_OWN_TRIP,
+          );
+        }
+
         const result = await this.rideModel.updateOne(
           { tripNumber: dto.tripNumber, rideStatus: RideStatus.PENDING },
           {
@@ -1145,10 +1194,8 @@ export class IvrService {
             Msg.RIDE_ALREADY_ASSIGNED,
           );
         }
-        const trip = await this.rideModel.findOne({
-          tripNumber: dto.tripNumber,
-        });
-        driver.activeRideId = trip ? trip._id.toString() : '';
+
+        driver.activeRideId = trip._id.toString();
         driver.isAvailable = false;
         await driver.save();
 
@@ -1269,7 +1316,7 @@ export class IvrService {
     }
   }
 
-  async getOnlineBatches(queueType?: string) {
+  async getOnlineBatches(queueType?: string, callerNumber?: string) {
     try {
       // 1. Auto-heal any drivers whose rides completed, dropped off, or timed out
       await this.healStaleAndFinishedDriverRides();
@@ -1283,6 +1330,13 @@ export class IvrService {
         isAvailable: true,
         status: { $nin: ['Block', 'INACTIVE'] },
       };
+
+      const cleanCaller = callerNumber
+        ? callerNumber.replace(/\D/g, '').slice(-10)
+        : null;
+      if (cleanCaller && cleanCaller.length >= 7) {
+        query.mobileNumber = { $not: new RegExp(`${cleanCaller}$`) };
+      }
 
       if (queueType) {
         const normalized = queueType.toUpperCase().trim();
@@ -1362,7 +1416,17 @@ export class IvrService {
         }
       }
 
-      const eligibleDrivers = await this.driverModel.find(query);
+      let eligibleDrivers = await this.driverModel.find(query);
+
+      // Exclude caller/customer phone so a driver is never dispatched to their own ride
+      if (cleanCaller && cleanCaller.length >= 7) {
+        eligibleDrivers = eligibleDrivers.filter((d) => {
+          const cleanDriverPhone = (d.mobileNumber || '')
+            .replace(/\D/g, '')
+            .slice(-10);
+          return !cleanDriverPhone || cleanDriverPhone !== cleanCaller;
+        });
+      }
 
       const mapDriver = (d: DriverDocument) => ({
         driverId: d.driverId,

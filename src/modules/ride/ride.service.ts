@@ -767,6 +767,22 @@ export class RideService {
 
       let driverData: DriverDocument | null = null;
       if (dto.driverNumber) {
+        const cleanDriverPhone = dto.driverNumber.replace(/\D/g, '').slice(-10);
+        const cleanCustomerPhone = (dto.customerNumber || '')
+          .replace(/\D/g, '')
+          .slice(-10);
+        if (
+          cleanDriverPhone &&
+          cleanCustomerPhone &&
+          cleanDriverPhone === cleanCustomerPhone
+        ) {
+          return new ApiResponse(
+            400,
+            {},
+            Msg.IVR_CANNOT_ACCEPT_OWN_TRIP,
+          );
+        }
+
         driverData = await this.driverModel.findOne({
           mobileNumber: dto.driverNumber,
         });
@@ -906,7 +922,23 @@ export class RideService {
         ];
       }
 
-      const eligibleDrivers = await this.driverModel.find(driverQuery);
+      const cleanCustomerPhone = (dto.customerNumber || '')
+        .replace(/\D/g, '')
+        .slice(-10);
+      if (cleanCustomerPhone && cleanCustomerPhone.length >= 7) {
+        driverQuery.mobileNumber = { $not: new RegExp(`${cleanCustomerPhone}$`) };
+      }
+
+      let eligibleDrivers = await this.driverModel.find(driverQuery);
+
+      if (cleanCustomerPhone && cleanCustomerPhone.length >= 7) {
+        eligibleDrivers = eligibleDrivers.filter((d) => {
+          const cleanDriverPhone = (d.mobileNumber || '')
+            .replace(/\D/g, '')
+            .slice(-10);
+          return !cleanDriverPhone || cleanDriverPhone !== cleanCustomerPhone;
+        });
+      }
 
       const batch1 = eligibleDrivers
         .filter(
