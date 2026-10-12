@@ -214,9 +214,7 @@ export class IvrService {
             : null,
           paymentResult,
         },
-        isApproved
-          ? Msg.RIDE_COMPLETED
-          : Msg.IVR_PAYMENT_DECLINED,
+        isApproved ? Msg.RIDE_COMPLETED : Msg.IVR_PAYMENT_DECLINED,
       );
     } catch (error) {
       console.log('Error while processing driver card in IVR:', error);
@@ -225,417 +223,343 @@ export class IvrService {
   }
 
   private isDriverBlocked(driver: DriverDocument): boolean {
-    return (
-      driver.status === 'Block' ||
-      driver.status === 'INACTIVE'
-    );
+    return driver.status === 'Block' || driver.status === 'INACTIVE';
   }
 
   async processDriverAction(dto: IvrDriverActionDto) {
     try {
       const callerNumber =
-      dto.callerNumber || dto.driverNumber || dto.phoneNumber || '';
-    const driver = await this.findDriverByPhoneNumber(callerNumber);
+        dto.callerNumber || dto.driverNumber || dto.phoneNumber || '';
+      const driver = await this.findDriverByPhoneNumber(callerNumber);
 
-    if (!driver) {
-      return new ApiResponse(
-        403,
-        { action: 'HANGUP' },
-        Msg.DRIVER_UNRECOGNIZED,
-      );
-    }
-
-    if (this.isDriverBlocked(driver) && !driver.activeRideId) {
-      return new ApiResponse(
-        403,
-        { action: 'SAY_ACCOUNT_LOCKED' },
-        Msg.IVR_DRIVER_ACCOUNT_LOCKED,
-      );
-    }
-
-    // Locate active ride
-    let activeRide: RideDocument | null = null;
-    if (driver.activeRideId) {
-      activeRide = await this.rideModel.findById(driver.activeRideId);
-      if (
-        activeRide &&
-        (activeRide.rideStatus === RideStatus.COMPLETED ||
-          activeRide.rideStatus === 'COMPLETED' ||
-          activeRide.rideStatus === RideStatus.CANCELLED ||
-          activeRide.rideStatus === 'CANCELLED' ||
-          activeRide.paymentStatus === PaymentStatus.COMPLETED ||
-          activeRide.paymentStatus === 'COMPLETED')
-      ) {
-        driver.activeRideId = '';
-        driver.isAvailable = true;
-        driver.ongoingRides = 'NO';
-        await driver.save();
-        activeRide = null;
+      if (!driver) {
+        return new ApiResponse(
+          403,
+          { action: 'HANGUP' },
+          Msg.DRIVER_UNRECOGNIZED,
+        );
       }
-    }
 
-    if (!activeRide) {
-      const driverFilter = {
-        $or: [
-          { driverId: driver._id.toString() },
-          { driverId: String(driver.driverId) },
-          { driverNumber: driver.mobileNumber },
-        ],
-      };
+      if (this.isDriverBlocked(driver) && !driver.activeRideId) {
+        return new ApiResponse(
+          403,
+          { action: 'SAY_ACCOUNT_LOCKED' },
+          Msg.IVR_DRIVER_ACCOUNT_LOCKED,
+        );
+      }
 
-      // Prioritize rides in progress or pending payment over newly assigned ACCEPTED rides
-      activeRide = await this.rideModel
-        .findOne({
-          ...driverFilter,
-          rideStatus: {
-            $in: [
-              RideStatus.PAYMENT_PENDING,
-              RideStatus.STARTED,
-              'PAYMENT_PENDING',
-              'STARTED',
-            ],
-          },
-        })
-        .sort({ createdAt: -1 });
+      // Locate active ride
+      let activeRide: RideDocument | null = null;
+      if (driver.activeRideId) {
+        activeRide = await this.rideModel.findById(driver.activeRideId);
+        if (
+          activeRide &&
+          (activeRide.rideStatus === RideStatus.COMPLETED ||
+            activeRide.rideStatus === 'COMPLETED' ||
+            activeRide.rideStatus === RideStatus.CANCELLED ||
+            activeRide.rideStatus === 'CANCELLED' ||
+            activeRide.paymentStatus === PaymentStatus.COMPLETED ||
+            activeRide.paymentStatus === 'COMPLETED')
+        ) {
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
+          await driver.save();
+          activeRide = null;
+        }
+      }
 
       if (!activeRide) {
+        const driverFilter = {
+          $or: [
+            { driverId: driver._id.toString() },
+            { driverId: String(driver.driverId) },
+            { driverNumber: driver.mobileNumber },
+          ],
+        };
+
+        // Prioritize rides in progress or pending payment over newly assigned ACCEPTED rides
         activeRide = await this.rideModel
           .findOne({
             ...driverFilter,
             rideStatus: {
-              $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
+              $in: [
+                RideStatus.PAYMENT_PENDING,
+                RideStatus.STARTED,
+                'PAYMENT_PENDING',
+                'STARTED',
+              ],
             },
           })
           .sort({ createdAt: -1 });
+
+        if (!activeRide) {
+          activeRide = await this.rideModel
+            .findOne({
+              ...driverFilter,
+              rideStatus: {
+                $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
+              },
+            })
+            .sort({ createdAt: -1 });
+        }
+
+        if (activeRide) {
+          driver.activeRideId = activeRide._id.toString();
+          driver.isAvailable = false;
+          await driver.save();
+        }
       }
 
-      if (activeRide) {
-        driver.activeRideId = activeRide._id.toString();
-        driver.isAvailable = false;
-        await driver.save();
-      }
-    }
+      // 1. Explicit Trip Cancellation check - must NEVER trigger Fare Override
+      const isCancelAction =
+        dto.action === 'CANCEL_TRIP' ||
+        dto.action === 'CANCEL' ||
+        dto.action === 'TRIP_CANCEL';
 
-    // 1. Explicit Trip Cancellation check - must NEVER trigger Fare Override
-    const isCancelAction =
-      dto.action === 'CANCEL_TRIP' ||
-      dto.action === 'CANCEL' ||
-      dto.action === 'TRIP_CANCEL';
-
-    if (isCancelAction) {
-      if (
-        activeRide &&
-        (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
-          activeRide.paymentStatus === 'COMPLETED' ||
-          activeRide.rideStatus === RideStatus.COMPLETED ||
-          activeRide.rideStatus === 'COMPLETED')
-      ) {
-        return new ApiResponse(
-          400,
-          {
-            action: 'SAY_CANNOT_CANCEL',
-            tripNumber: activeRide.tripNumber,
-            rideStatus: activeRide.rideStatus,
-            paymentStatus: activeRide.paymentStatus,
-          },
-          'Cannot cancel trip once payment has already been completed.',
-        );
-      }
-
-      if (activeRide) {
-        activeRide.rideStatus = RideStatus.CANCELLED;
-        await activeRide.save();
-        await this.cancelOtherCalls(activeRide.tripNumber);
-      }
-
-      driver.activeRideId = '';
-      driver.isAvailable = true;
-      driver.ongoingRides = 'NO';
-      await driver.save();
-
-      return new ApiResponse(
-        200,
-        {
-          action: 'TRIP_CANCELLED',
-          tripNumber: activeRide ? activeRide.tripNumber : null,
-          workflowStage: 'CANCELLED',
-          rideStatus: 'CANCELLED',
-        },
-        Msg.IVR_TRIP_CANCELLED,
-      );
-    }
-
-    // Check if this action is an override request (ONLY if not cancelling)
-    const isOverrideAction =
-      dto.action === 'OVERRIDE_FARE' ||
-      dto.action === 'OVERRIDE' ||
-      ((dto.overrideAmountCents !== undefined ||
-        dto.amountCents !== undefined ||
-        dto.overrideAmount !== undefined ||
-        dto.amount !== undefined) &&
-        !dto.action);
-
-    const hasOverrideDigits =
-      activeRide &&
-      activeRide.paymentType === 'OVERRIDE' &&
-      dto.dtmfInput &&
-      dto.dtmfInput.length >= 2 &&
-      /^\d+/.test(dto.dtmfInput.replace(/#/g, ''));
-
-    if (isOverrideAction || hasOverrideDigits) {
-      return this.handleFareOverride(driver, activeRide, dto);
-    }
-
-    if (activeRide) {
-      if (!dto.dtmfInput) {
-        if (activeRide.rideStatus === RideStatus.ACCEPTED) {
+      if (isCancelAction) {
+        if (
+          activeRide &&
+          (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
+            activeRide.paymentStatus === 'COMPLETED' ||
+            activeRide.rideStatus === RideStatus.COMPLETED ||
+            activeRide.rideStatus === 'COMPLETED')
+        ) {
           return new ApiResponse(
-            200,
-            { menu: 'START_OR_CANCEL' },
-            Msg.IVR_PLAY_START_CANCEL_MENU,
-          );
-        } else if (activeRide.rideStatus === RideStatus.STARTED) {
-          return new ApiResponse(
-            200,
-            { menu: 'FINISH' },
-            Msg.IVR_PLAY_FINISH_MENU,
-          );
-        } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
-          if (!activeRide.selectedZone) {
-            return new ApiResponse(
-              200,
-              { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
-              Msg.IVR_PLAY_ZONE_SELECTION_MENU,
-            );
-          }
-          return new ApiResponse(
-            200,
+            400,
             {
-              action: 'PLAY_PAYMENT_MENU',
-              menu: 'PAYMENT_OPTIONS',
-              calculatedFare: activeRide.rideAmount,
-              selectedZone: activeRide.selectedZone,
-              currency: 'USD',
+              action: 'SAY_CANNOT_CANCEL',
+              tripNumber: activeRide.tripNumber,
+              rideStatus: activeRide.rideStatus,
+              paymentStatus: activeRide.paymentStatus,
             },
-            Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU,
+            'Cannot cancel trip once payment has already been completed.',
           );
         }
-      } else {
-        if (
-          activeRide.rideStatus === RideStatus.ACCEPTED &&
-          dto.dtmfInput === '1'
-        ) {
-          activeRide.rideStatus = RideStatus.STARTED;
-          activeRide.rideStartDateTime = new Date().toISOString();
-          await activeRide.save();
-          return new ApiResponse(
-            200,
-            { action: 'SAY_STARTED' },
-            Msg.RIDE_STARTED,
-          );
-        } else if (
-          activeRide.rideStatus === RideStatus.ACCEPTED &&
-          dto.dtmfInput === '3'
-        ) {
-          activeRide.rideStatus = RideStatus.PENDING;
-          activeRide.driverId = '';
-          driver.activeRideId = '';
-          driver.isAvailable = true;
-          driver.ongoingRides = 'NO';
-          await activeRide.save();
-          await driver.save();
-          return new ApiResponse(
-            200,
-            { action: 'SAY_CANCELLED' },
-            Msg.RIDE_CANCELLED,
-          );
-        } else if (
-          activeRide.rideStatus === RideStatus.STARTED &&
-          (dto.dtmfInput === '3' || dto.dtmfInput === '9' || dto.dtmfInput === '8')
-        ) {
+
+        if (activeRide) {
           activeRide.rideStatus = RideStatus.CANCELLED;
           await activeRide.save();
           await this.cancelOtherCalls(activeRide.tripNumber);
-          driver.activeRideId = '';
-          driver.isAvailable = true;
-          driver.ongoingRides = 'NO';
-          await driver.save();
-          return new ApiResponse(
-            200,
-            {
-              action: 'TRIP_CANCELLED',
-              tripNumber: activeRide.tripNumber,
-              workflowStage: 'CANCELLED',
-              rideStatus: 'CANCELLED',
-            },
-            Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
-          );
-        } else if (
-          activeRide.rideStatus === RideStatus.STARTED &&
-          dto.dtmfInput === '2'
-        ) {
-          activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
-          activeRide.rideCompleteDateTime = new Date().toISOString();
-          if (driver) {
-            activeRide.driverId = driver._id.toString();
-            activeRide.driverNumber = driver.mobileNumber;
-            activeRide.driverName = driver.driverName;
-          }
-          await activeRide.save();
-          await driver.save();
-          return new ApiResponse(
-            200,
-            { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
-            Msg.IVR_PLAY_ZONE_SELECTION_MENU,
-          );
-        } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
-          // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
-          if (!activeRide.selectedZone) {
-            if (
-              dto.dtmfInput === '9' ||
-              dto.dtmfInput === '8' ||
-              dto.action === 'CANCEL_TRIP' ||
-              dto.action === 'CANCEL'
-            ) {
-              activeRide.rideStatus = RideStatus.CANCELLED;
-              await activeRide.save();
-              await this.cancelOtherCalls(activeRide.tripNumber);
-              driver.activeRideId = '';
-              driver.isAvailable = true;
-              driver.ongoingRides = 'NO';
-              await driver.save();
-              return new ApiResponse(
-                200,
-                {
-                  action: 'TRIP_CANCELLED',
-                  tripNumber: activeRide.tripNumber,
-                  workflowStage: 'CANCELLED',
-                  rideStatus: 'CANCELLED',
-                },
-                Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
-              );
-            }
+        }
 
-            if (!['1', '2', '3', '4'].includes(dto.dtmfInput)) {
+        driver.activeRideId = '';
+        driver.isAvailable = true;
+        driver.ongoingRides = 'NO';
+        await driver.save();
+
+        return new ApiResponse(
+          200,
+          {
+            action: 'TRIP_CANCELLED',
+            tripNumber: activeRide ? activeRide.tripNumber : null,
+            workflowStage: 'CANCELLED',
+            rideStatus: 'CANCELLED',
+          },
+          Msg.IVR_TRIP_CANCELLED,
+        );
+      }
+
+      // Check if this action is an override request (ONLY if not cancelling)
+      const isOverrideAction =
+        dto.action === 'OVERRIDE_FARE' ||
+        dto.action === 'OVERRIDE' ||
+        ((dto.overrideAmountCents !== undefined ||
+          dto.amountCents !== undefined ||
+          dto.overrideAmount !== undefined ||
+          dto.amount !== undefined) &&
+          !dto.action);
+
+      const hasOverrideDigits =
+        activeRide &&
+        activeRide.paymentType === 'OVERRIDE' &&
+        dto.dtmfInput &&
+        dto.dtmfInput.length >= 2 &&
+        /^\d+/.test(dto.dtmfInput.replace(/#/g, ''));
+
+      if (isOverrideAction || hasOverrideDigits) {
+        return this.handleFareOverride(driver, activeRide, dto);
+      }
+
+      if (activeRide) {
+        if (!dto.dtmfInput) {
+          if (activeRide.rideStatus === RideStatus.ACCEPTED) {
+            return new ApiResponse(
+              200,
+              { menu: 'START_OR_CANCEL' },
+              Msg.IVR_PLAY_START_CANCEL_MENU,
+            );
+          } else if (activeRide.rideStatus === RideStatus.STARTED) {
+            return new ApiResponse(
+              200,
+              { menu: 'FINISH' },
+              Msg.IVR_PLAY_FINISH_MENU,
+            );
+          } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+            if (!activeRide.selectedZone) {
               return new ApiResponse(
                 200,
                 { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
                 Msg.IVR_PLAY_ZONE_SELECTION_MENU,
               );
             }
-            let durationMinutes = 0;
-            if (
-              activeRide.rideStartDateTime &&
-              activeRide.rideCompleteDateTime
-            ) {
-              const start = new Date(activeRide.rideStartDateTime).getTime();
-              const end = new Date(activeRide.rideCompleteDateTime).getTime();
-              durationMinutes = Math.ceil((end - start) / 60000);
-            }
-
-            const fareDetails = await this.pricingService.calculateZoneFare(
-              dto.dtmfInput,
-              durationMinutes,
-              activeRide.rideStartDateTime,
-            );
-
-            activeRide.selectedZone = fareDetails.zone;
-            activeRide.rideAmount = fareDetails.calculatedFare;
-            activeRide.originalCalculatedFare = fareDetails.calculatedFare;
-            await activeRide.save();
-
             return new ApiResponse(
               200,
               {
                 action: 'PLAY_PAYMENT_MENU',
                 menu: 'PAYMENT_OPTIONS',
-                durationMinutes,
-                calculatedFare: fareDetails.calculatedFare,
-                selectedZone: fareDetails.zone,
-                currency: fareDetails.currency,
+                calculatedFare: activeRide.rideAmount,
+                selectedZone: activeRide.selectedZone,
+                currency: 'USD',
               },
-              Msg.IVR_FARE_CALCULATED_PROMPT(
-                durationMinutes,
-                fareDetails.calculatedFare,
-              ),
+              Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU,
             );
           }
-
-          if (dto.dtmfInput === '1') {
-            activeRide.paymentType = PaymentType.CASH;
-            activeRide.paymentStatus = PaymentStatus.COMPLETED;
-            activeRide.rideStatus = RideStatus.COMPLETED;
-            activeRide.ridePaymentDateTime = new Date().toISOString();
-
+        } else {
+          if (
+            activeRide.rideStatus === RideStatus.ACCEPTED &&
+            dto.dtmfInput === '1'
+          ) {
+            activeRide.rideStatus = RideStatus.STARTED;
+            activeRide.rideStartDateTime = new Date().toISOString();
+            await activeRide.save();
+            return new ApiResponse(
+              200,
+              { action: 'SAY_STARTED' },
+              Msg.RIDE_STARTED,
+            );
+          } else if (
+            activeRide.rideStatus === RideStatus.ACCEPTED &&
+            dto.dtmfInput === '3'
+          ) {
+            activeRide.rideStatus = RideStatus.PENDING;
+            activeRide.driverId = '';
             driver.activeRideId = '';
             driver.isAvailable = true;
             driver.ongoingRides = 'NO';
-            driver.lastTripTaken = new Date();
-            driver.earningsWithCash =
-              (driver.earningsWithCash || 0) + (activeRide.rideAmount || 0);
-            driver.totalEarnings =
-              (driver.earningsWithCash || 0) +
-              (driver.earningsWithoutCash || 0);
-
             await activeRide.save();
             await driver.save();
-            await this.paymentService.logCashPayment(
-              activeRide,
-              activeRide.rideAmount,
-            );
             return new ApiResponse(
               200,
-              { action: 'SAY_PAYMENT_CASH_SUCCESS' },
-              Msg.RIDE_COMPLETED,
+              { action: 'SAY_CANCELLED' },
+              Msg.RIDE_CANCELLED,
             );
-          } else if (dto.dtmfInput === '2') {
-            activeRide.paymentType = PaymentType.CREDIT_CARD;
+          } else if (
+            activeRide.rideStatus === RideStatus.STARTED &&
+            (dto.dtmfInput === '3' ||
+              dto.dtmfInput === '9' ||
+              dto.dtmfInput === '8')
+          ) {
+            activeRide.rideStatus = RideStatus.CANCELLED;
             await activeRide.save();
+            await this.cancelOtherCalls(activeRide.tripNumber);
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            await driver.save();
             return new ApiResponse(
               200,
               {
-                action: 'PROMPT_CARD_DETAILS',
-                menu: 'CARD_ENTRY',
+                action: 'TRIP_CANCELLED',
                 tripNumber: activeRide.tripNumber,
-                calculatedFare: activeRide.rideAmount,
-                currency: 'USD',
+                workflowStage: 'CANCELLED',
+                rideStatus: 'CANCELLED',
               },
-              Msg.IVR_ENTER_CARD_DETAILS,
+              Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
             );
-          } else if (dto.dtmfInput === '3') {
-            const customerPhone = activeRide.customerNumber || '';
-            const customer = customerPhone
-              ? await this.findCustomerByPhoneNumber(customerPhone)
-              : null;
-            const fareAmount = activeRide.rideAmount || 0;
+          } else if (
+            activeRide.rideStatus === RideStatus.STARTED &&
+            dto.dtmfInput === '2'
+          ) {
+            activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+            activeRide.rideCompleteDateTime = new Date().toISOString();
+            if (driver) {
+              activeRide.driverId = driver._id.toString();
+              activeRide.driverNumber = driver.mobileNumber;
+              activeRide.driverName = driver.driverName;
+            }
+            await activeRide.save();
+            await driver.save();
+            return new ApiResponse(
+              200,
+              { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+              Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+            );
+          } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+            // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
+            if (!activeRide.selectedZone) {
+              if (
+                dto.dtmfInput === '9' ||
+                dto.dtmfInput === '8' ||
+                dto.action === 'CANCEL_TRIP' ||
+                dto.action === 'CANCEL'
+              ) {
+                activeRide.rideStatus = RideStatus.CANCELLED;
+                await activeRide.save();
+                await this.cancelOtherCalls(activeRide.tripNumber);
+                driver.activeRideId = '';
+                driver.isAvailable = true;
+                driver.ongoingRides = 'NO';
+                await driver.save();
+                return new ApiResponse(
+                  200,
+                  {
+                    action: 'TRIP_CANCELLED',
+                    tripNumber: activeRide.tripNumber,
+                    workflowStage: 'CANCELLED',
+                    rideStatus: 'CANCELLED',
+                  },
+                  Msg.IVR_TRIP_CANCELLED_BEFORE_PAYMENT,
+                );
+              }
 
-            if (!customer) {
-              activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
-              activeRide.paymentStatus = PaymentStatus.FAILED;
+              if (!['1', '2', '3', '4'].includes(dto.dtmfInput)) {
+                return new ApiResponse(
+                  200,
+                  { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+                  Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+                );
+              }
+              let durationMinutes = 0;
+              if (
+                activeRide.rideStartDateTime &&
+                activeRide.rideCompleteDateTime
+              ) {
+                const start = new Date(activeRide.rideStartDateTime).getTime();
+                const end = new Date(activeRide.rideCompleteDateTime).getTime();
+                durationMinutes = Math.ceil((end - start) / 60000);
+              }
+
+              const fareDetails = await this.pricingService.calculateZoneFare(
+                dto.dtmfInput,
+                durationMinutes,
+                activeRide.rideStartDateTime,
+              );
+
+              activeRide.selectedZone = fareDetails.zone;
+              activeRide.rideAmount = fareDetails.calculatedFare;
+              activeRide.originalCalculatedFare = fareDetails.calculatedFare;
               await activeRide.save();
 
               return new ApiResponse(
                 200,
                 {
-                  action: 'SAY_PAYMENT_FAILED',
+                  action: 'PLAY_PAYMENT_MENU',
                   menu: 'PAYMENT_OPTIONS',
-                  calculatedFare: activeRide.rideAmount,
-                  fareOverrideApplied: !!activeRide.fareOverrideApplied,
-                  currency: 'USD',
-                  error: 'Customer account not found for this phone number.',
+                  durationMinutes,
+                  calculatedFare: fareDetails.calculatedFare,
+                  selectedZone: fareDetails.zone,
+                  currency: fareDetails.currency,
                 },
-                Msg.IVR_CUSTOMER_ACCOUNT_NOT_FOUND,
+                Msg.IVR_FARE_CALCULATED_PROMPT(
+                  durationMinutes,
+                  fareDetails.calculatedFare,
+                ),
               );
             }
 
-            // Step 1: Check if customer has enough prepaid money/balance on account
-            if ((customer.credit || 0) >= fareAmount && fareAmount >= 0) {
-              customer.credit = Number(
-                ((customer.credit || 0) - fareAmount).toFixed(2),
-              );
-              await customer.save();
-
-              activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+            if (dto.dtmfInput === '1') {
+              activeRide.paymentType = PaymentType.CASH;
               activeRide.paymentStatus = PaymentStatus.COMPLETED;
               activeRide.rideStatus = RideStatus.COMPLETED;
               activeRide.ridePaymentDateTime = new Date().toISOString();
@@ -644,51 +568,74 @@ export class IvrService {
               driver.isAvailable = true;
               driver.ongoingRides = 'NO';
               driver.lastTripTaken = new Date();
-              driver.earningsWithoutCash =
-                (driver.earningsWithoutCash || 0) + fareAmount;
+              driver.earningsWithCash =
+                (driver.earningsWithCash || 0) + (activeRide.rideAmount || 0);
               driver.totalEarnings =
                 (driver.earningsWithCash || 0) +
                 (driver.earningsWithoutCash || 0);
 
               await activeRide.save();
               await driver.save();
-
-              await this.paymentService.logAccountBalancePayment(
+              await this.paymentService.logCashPayment(
                 activeRide,
-                fareAmount,
-                customer.credit,
+                activeRide.rideAmount,
               );
-
+              return new ApiResponse(
+                200,
+                { action: 'SAY_PAYMENT_CASH_SUCCESS' },
+                Msg.RIDE_COMPLETED,
+              );
+            } else if (dto.dtmfInput === '2') {
+              activeRide.paymentType = PaymentType.CREDIT_CARD;
+              await activeRide.save();
               return new ApiResponse(
                 200,
                 {
-                  action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
-                  remainingBalance: customer.credit,
-                  paidVia: 'PREPAID_BALANCE',
+                  action: 'PROMPT_CARD_DETAILS',
+                  menu: 'CARD_ENTRY',
+                  tripNumber: activeRide.tripNumber,
+                  calculatedFare: activeRide.rideAmount,
+                  currency: 'USD',
                 },
-                Msg.IVR_ACCOUNT_BALANCE_SUCCESS(customer.credit),
+                Msg.IVR_ENTER_CARD_DETAILS,
               );
-            }
+            } else if (dto.dtmfInput === '3') {
+              const customerPhone = activeRide.customerNumber || '';
+              const customer = customerPhone
+                ? await this.findCustomerByPhoneNumber(customerPhone)
+                : null;
+              const fareAmount = activeRide.rideAmount || 0;
 
-            // Step 2: If insufficient prepaid balance, check if customer has a valid credit card linked/on file
-            if (customer.usaepayCustomerId) {
-              const vaultResult = await this.paymentService.chargeRideVault({
-                tripNumber: activeRide.tripNumber,
-                amount: fareAmount,
-                customerId: customer.usaepayCustomerId,
-              });
+              if (!customer) {
+                activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+                activeRide.paymentStatus = PaymentStatus.FAILED;
+                await activeRide.save();
 
-              if (
-                vaultResult &&
-                vaultResult.statusCode === 200 &&
-                (vaultResult.data?.status === 'Approved' ||
-                  vaultResult.data?.alreadyPaid)
-              ) {
-                activeRide.paymentType = PaymentType.SAVED_CARD;
+                return new ApiResponse(
+                  200,
+                  {
+                    action: 'SAY_PAYMENT_FAILED',
+                    menu: 'PAYMENT_OPTIONS',
+                    calculatedFare: activeRide.rideAmount,
+                    fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                    currency: 'USD',
+                    error: 'Customer account not found for this phone number.',
+                  },
+                  Msg.IVR_CUSTOMER_ACCOUNT_NOT_FOUND,
+                );
+              }
+
+              // Step 1: Check if customer has enough prepaid money/balance on account
+              if ((customer.credit || 0) >= fareAmount && fareAmount >= 0) {
+                customer.credit = Number(
+                  ((customer.credit || 0) - fareAmount).toFixed(2),
+                );
+                await customer.save();
+
+                activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
                 activeRide.paymentStatus = PaymentStatus.COMPLETED;
                 activeRide.rideStatus = RideStatus.COMPLETED;
-                activeRide.ridePaymentDateTime =
-                  activeRide.ridePaymentDateTime || new Date().toISOString();
+                activeRide.ridePaymentDateTime = new Date().toISOString();
 
                 driver.activeRideId = '';
                 driver.isAvailable = true;
@@ -703,17 +650,86 @@ export class IvrService {
                 await activeRide.save();
                 await driver.save();
 
+                await this.paymentService.logAccountBalancePayment(
+                  activeRide,
+                  fareAmount,
+                  customer.credit,
+                );
+
                 return new ApiResponse(
                   200,
                   {
                     action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
-                    paidVia: 'CARD_ON_FILE',
+                    remainingBalance: customer.credit,
+                    paidVia: 'PREPAID_BALANCE',
                   },
-                  Msg.IVR_CARD_ON_FILE_PAYMENT_SUCCESS,
+                  Msg.IVR_ACCOUNT_BALANCE_SUCCESS(customer.credit),
                 );
               }
 
-              // Card on file was declined by gateway
+              // Step 2: If insufficient prepaid balance, check if customer has a valid credit card linked/on file
+              if (customer.usaepayCustomerId) {
+                const vaultResult = await this.paymentService.chargeRideVault({
+                  tripNumber: activeRide.tripNumber,
+                  amount: fareAmount,
+                  customerId: customer.usaepayCustomerId,
+                });
+
+                if (
+                  vaultResult &&
+                  vaultResult.statusCode === 200 &&
+                  (vaultResult.data?.status === 'Approved' ||
+                    vaultResult.data?.alreadyPaid)
+                ) {
+                  activeRide.paymentType = PaymentType.SAVED_CARD;
+                  activeRide.paymentStatus = PaymentStatus.COMPLETED;
+                  activeRide.rideStatus = RideStatus.COMPLETED;
+                  activeRide.ridePaymentDateTime =
+                    activeRide.ridePaymentDateTime || new Date().toISOString();
+
+                  driver.activeRideId = '';
+                  driver.isAvailable = true;
+                  driver.ongoingRides = 'NO';
+                  driver.lastTripTaken = new Date();
+                  driver.earningsWithoutCash =
+                    (driver.earningsWithoutCash || 0) + fareAmount;
+                  driver.totalEarnings =
+                    (driver.earningsWithCash || 0) +
+                    (driver.earningsWithoutCash || 0);
+
+                  await activeRide.save();
+                  await driver.save();
+
+                  return new ApiResponse(
+                    200,
+                    {
+                      action: 'SAY_PAYMENT_ACCOUNT_SUCCESS',
+                      paidVia: 'CARD_ON_FILE',
+                    },
+                    Msg.IVR_CARD_ON_FILE_PAYMENT_SUCCESS,
+                  );
+                }
+
+                // Card on file was declined by gateway
+                activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
+                activeRide.paymentStatus = PaymentStatus.FAILED;
+                await activeRide.save();
+
+                return new ApiResponse(
+                  200,
+                  {
+                    action: 'SAY_PAYMENT_FAILED',
+                    menu: 'PAYMENT_OPTIONS',
+                    calculatedFare: activeRide.rideAmount,
+                    fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                    currency: 'USD',
+                    error: vaultResult?.message || 'Card on file was declined',
+                  },
+                  Msg.IVR_CARD_ON_FILE_DECLINED,
+                );
+              }
+
+              // Step 3: Neither prepaid balance nor a card on file is available
               activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
               activeRide.paymentStatus = PaymentStatus.FAILED;
               await activeRide.save();
@@ -726,140 +742,125 @@ export class IvrService {
                   calculatedFare: activeRide.rideAmount,
                   fareOverrideApplied: !!activeRide.fareOverrideApplied,
                   currency: 'USD',
-                  error: vaultResult?.message || 'Card on file was declined',
+                  error:
+                    'Customer does not have a linked credit card or sufficient account balance.',
                 },
-                Msg.IVR_CARD_ON_FILE_DECLINED,
+                Msg.IVR_NO_VALID_CARD_OR_BALANCE,
+              );
+            } else if (dto.dtmfInput === '4') {
+              activeRide.paymentType = 'OVERRIDE';
+              await activeRide.save();
+              return new ApiResponse(
+                200,
+                { action: 'PROMPT_OVERRIDE_AMOUNT' },
+                Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
+              );
+            } else if (dto.dtmfInput === '9' || dto.dtmfInput === '8') {
+              activeRide.rideStatus = RideStatus.CANCELLED;
+              await activeRide.save();
+              await this.cancelOtherCalls(activeRide.tripNumber);
+
+              driver.activeRideId = '';
+              driver.isAvailable = true;
+              driver.ongoingRides = 'NO';
+              await driver.save();
+
+              return new ApiResponse(
+                200,
+                {
+                  action: 'TRIP_CANCELLED',
+                  tripNumber: activeRide.tripNumber,
+                  workflowStage: 'CANCELLED',
+                  rideStatus: 'CANCELLED',
+                },
+                Msg.IVR_TRIP_CANCELLED,
+              );
+            } else if (dto.dtmfInput === '0') {
+              return new ApiResponse(
+                200,
+                {
+                  action: 'PLAY_PAYMENT_MENU',
+                  menu: 'PAYMENT_OPTIONS',
+                  calculatedFare: activeRide.rideAmount,
+                  fareOverrideApplied: !!activeRide.fareOverrideApplied,
+                  currency: 'USD',
+                },
+                Msg.IVR_RETURNED_TO_PAYMENT_MENU,
               );
             }
-
-            // Step 3: Neither prepaid balance nor a card on file is available
-            activeRide.paymentType = PaymentType.CUSTOMER_ACCOUNT;
-            activeRide.paymentStatus = PaymentStatus.FAILED;
-            await activeRide.save();
-
-            return new ApiResponse(
-              200,
-              {
-                action: 'SAY_PAYMENT_FAILED',
-                menu: 'PAYMENT_OPTIONS',
-                calculatedFare: activeRide.rideAmount,
-                fareOverrideApplied: !!activeRide.fareOverrideApplied,
-                currency: 'USD',
-                error:
-                  'Customer does not have a linked credit card or sufficient account balance.',
-              },
-              Msg.IVR_NO_VALID_CARD_OR_BALANCE,
-            );
-          } else if (dto.dtmfInput === '4') {
-            activeRide.paymentType = 'OVERRIDE';
-            await activeRide.save();
-            return new ApiResponse(
-              200,
-              { action: 'PROMPT_OVERRIDE_AMOUNT' },
-              Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
-            );
-          } else if (dto.dtmfInput === '9' || dto.dtmfInput === '8') {
-            activeRide.rideStatus = RideStatus.CANCELLED;
-            await activeRide.save();
-            await this.cancelOtherCalls(activeRide.tripNumber);
-
-            driver.activeRideId = '';
-            driver.isAvailable = true;
-            driver.ongoingRides = 'NO';
-            await driver.save();
-
-            return new ApiResponse(
-              200,
-              {
-                action: 'TRIP_CANCELLED',
-                tripNumber: activeRide.tripNumber,
-                workflowStage: 'CANCELLED',
-                rideStatus: 'CANCELLED',
-              },
-              Msg.IVR_TRIP_CANCELLED,
-            );
-          } else if (dto.dtmfInput === '0') {
-            return new ApiResponse(
-              200,
-              {
-                action: 'PLAY_PAYMENT_MENU',
-                menu: 'PAYMENT_OPTIONS',
-                calculatedFare: activeRide.rideAmount,
-                fareOverrideApplied: !!activeRide.fareOverrideApplied,
-                currency: 'USD',
-              },
-              Msg.IVR_RETURNED_TO_PAYMENT_MENU,
-            );
           }
         }
-      }
-    } else {
-      if (!dto.dtmfInput) {
-        return new ApiResponse(
-          200,
-          { menu: 'LOGIN_LOGOUT' },
-          Msg.IVR_PLAY_LOGIN_MENU,
-        );
+      } else {
+        if (!dto.dtmfInput) {
+          return new ApiResponse(
+            200,
+            { menu: 'LOGIN_LOGOUT' },
+            Msg.IVR_PLAY_LOGIN_MENU,
+          );
+        }
+
+        if (this.isDriverBlocked(driver)) {
+          return new ApiResponse(
+            403,
+            { action: 'SAY_ACCOUNT_LOCKED' },
+            Msg.IVR_DRIVER_ACCOUNT_LOCKED,
+          );
+        }
+
+        if (dto.dtmfInput === '4' || dto.action === 'LOGOUT') {
+          driver.isLoggedIn = false;
+          driver.isAvailable = false;
+          driver.loginLogout = 'STOP';
+          await driver.save();
+          return new ApiResponse(
+            200,
+            { action: 'SAY_LOGGED_OUT' },
+            Msg.USER_LOGGED_OUT,
+          );
+        } else if (dto.dtmfInput === '1') {
+          driver.isLoggedIn = true;
+          driver.isAvailable = true;
+          driver.queueType = 'LOCAL';
+          driver.assignQueue = 'Local_Rides';
+          driver.loginLogout = 'START';
+          await driver.save();
+          return new ApiResponse(
+            200,
+            { action: 'SAY_LOGGED_IN', queueType: 'LOCAL' },
+            Msg.USER_LOGIN,
+          );
+        } else if (dto.dtmfInput === '2') {
+          driver.isLoggedIn = true;
+          driver.isAvailable = true;
+          driver.queueType = 'LONG_DISTANCE';
+          driver.assignQueue = 'Long_Distance_Ride';
+          driver.loginLogout = 'START';
+          await driver.save();
+          return new ApiResponse(
+            200,
+            { action: 'SAY_LOGGED_IN', queueType: 'LONG_DISTANCE' },
+            Msg.USER_LOGIN,
+          );
+        } else if (dto.dtmfInput === '3') {
+          driver.isLoggedIn = true;
+          driver.isAvailable = true;
+          driver.queueType = 'BOTH';
+          driver.assignQueue = 'BOTH';
+          driver.loginLogout = 'START';
+          await driver.save();
+          return new ApiResponse(
+            200,
+            { action: 'SAY_LOGGED_IN', queueType: 'BOTH' },
+            Msg.USER_LOGIN,
+          );
+        }
       }
 
-      if (this.isDriverBlocked(driver)) {
-        return new ApiResponse(
-          403,
-          { action: 'SAY_ACCOUNT_LOCKED' },
-          Msg.IVR_DRIVER_ACCOUNT_LOCKED,
-        );
-      }
-
-      if (dto.dtmfInput === '4' || dto.action === 'LOGOUT') {
-        driver.isLoggedIn = false;
-        driver.isAvailable = false;
-        driver.loginLogout = 'STOP';
-        await driver.save();
-        return new ApiResponse(
-          200,
-          { action: 'SAY_LOGGED_OUT' },
-          Msg.USER_LOGGED_OUT,
-        );
-      } else if (dto.dtmfInput === '1') {
-        driver.isLoggedIn = true;
-        driver.isAvailable = true;
-        driver.queueType = 'LOCAL';
-        driver.assignQueue = 'Local_Rides';
-        driver.loginLogout = 'START';
-        await driver.save();
-        return new ApiResponse(
-          200,
-          { action: 'SAY_LOGGED_IN', queueType: 'LOCAL' },
-          Msg.USER_LOGIN,
-        );
-      } else if (dto.dtmfInput === '2') {
-        driver.isLoggedIn = true;
-        driver.isAvailable = true;
-        driver.queueType = 'LONG_DISTANCE';
-        driver.assignQueue = 'Long_Distance_Ride';
-        driver.loginLogout = 'START';
-        await driver.save();
-        return new ApiResponse(
-          200,
-          { action: 'SAY_LOGGED_IN', queueType: 'LONG_DISTANCE' },
-          Msg.USER_LOGIN,
-        );
-      } else if (dto.dtmfInput === '3') {
-        driver.isLoggedIn = true;
-        driver.isAvailable = true;
-        driver.queueType = 'BOTH';
-        driver.assignQueue = 'BOTH';
-        driver.loginLogout = 'START';
-        await driver.save();
-        return new ApiResponse(
-          200,
-          { action: 'SAY_LOGGED_IN', queueType: 'BOTH' },
-          Msg.USER_LOGIN,
-        );
-      }
-    }
-
-      return new ApiResponse(200, { action: 'INVALID_INPUT' }, Msg.INVALID_INPUT);
+      return new ApiResponse(
+        200,
+        { action: 'INVALID_INPUT' },
+        Msg.INVALID_INPUT,
+      );
     } catch (error) {
       console.error('Error in processDriverAction:', error);
       return new ApiResponse(
@@ -1069,11 +1070,7 @@ export class IvrService {
     }
 
     if (!dto.dispatchId && !dto.tripNumber) {
-      return new ApiResponse(
-        400,
-        {},
-        Msg.IVR_DISPATCH_OR_TRIP_REQUIRED,
-      );
+      return new ApiResponse(400, {}, Msg.IVR_DISPATCH_OR_TRIP_REQUIRED);
     }
 
     // --- PRE-BOOKING DISPATCH FLOW (Using dispatchId) ---
@@ -1415,7 +1412,9 @@ export class IvrService {
             {
               $or: [
                 { queueType: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
-                { assignQueue: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+                {
+                  assignQueue: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] },
+                },
               ],
             },
           ];
@@ -1443,10 +1442,7 @@ export class IvrService {
       // Drivers without an explicit batch (or batch !== 2, 3) default to Batch 1 so no driver is lost
       const batch1Drivers = eligibleDrivers
         .filter(
-          (d) =>
-            !d.batch ||
-            d.batch === 1 ||
-            (d.batch !== 2 && d.batch !== 3),
+          (d) => !d.batch || d.batch === 1 || (d.batch !== 2 && d.batch !== 3),
         )
         .map(mapDriver);
       const batch2Drivers = eligibleDrivers
@@ -1667,7 +1663,11 @@ export class IvrService {
               {
                 $or: [
                   { rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] } },
-                  { paymentStatus: { $in: [PaymentStatus.COMPLETED, 'COMPLETED'] } },
+                  {
+                    paymentStatus: {
+                      $in: [PaymentStatus.COMPLETED, 'COMPLETED'],
+                    },
+                  },
                 ],
               },
             ],
@@ -1919,14 +1919,17 @@ export class IvrService {
           }
         }
         if (!driver && rideToReport.driverNumber) {
-          driver = await this.findDriverByPhoneNumber(rideToReport.driverNumber);
+          driver = await this.findDriverByPhoneNumber(
+            rideToReport.driverNumber,
+          );
         }
 
         if (driver) {
           driverDetails = {
             driverId: driver.driverId || driver._id,
             driverName: driver.driverName || rideToReport.driverName || '',
-            mobileNumber: driver.mobileNumber || rideToReport.driverNumber || '',
+            mobileNumber:
+              driver.mobileNumber || rideToReport.driverNumber || '',
             vehicleNumber: driver.vehicleNumber || '',
             makeModel: driver.makeModel || '',
             color: driver.color || '',

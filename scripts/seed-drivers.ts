@@ -20,7 +20,7 @@ async function bootstrap() {
 
   fs.createReadStream(csvFilePath)
     .pipe(csv())
-    .on('data', (data) => {
+    .on('data', (data: any) => {
       const parsedId = Number(data['#'] || data[' #'] || data['\ufeff#'] || 0);
       results.push({
         driverId: isNaN(parsedId) ? 0 : parsedId,
