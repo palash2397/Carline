@@ -182,8 +182,14 @@ export class RideService {
       ) {
         conditions.push({ customerNumber: customer.accountNumber });
       }
-      if ((customer as any).name || (customer as any).customerName) {
-        const cName = (customer as any).name || (customer as any).customerName;
+      const cName =
+        (customer as any).fullName ||
+        (customer as any).name ||
+        (customer as any).customerName;
+      const isGeneric =
+        !cName ||
+        /^(ivr\s*customer|customer|guest|user|unknown)$/i.test(cName.trim());
+      if (cName && !isGeneric) {
         conditions.push({
           customerName: {
             $regex: cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
@@ -240,27 +246,37 @@ export class RideService {
       );
     }
 
-    // Phone / Numeric matches on direct ride fields
+    // Numeric match for rideId (#)
+    const numSearch = Number(cleanDigits || trimmed);
+    if (!isNaN(numSearch) && numSearch > 0 && String(numSearch).length <= 6) {
+      orConditions.push({ rideId: numSearch });
+    }
+
+    // Phone / Numeric matches on direct ride fields (supports formatted phones like (845) 537-8544)
     if (cleanDigits.length >= 7) {
       orConditions.push(
         { driverNumber: { $regex: cleanDigits, $options: 'i' } },
         { customerNumber: { $regex: cleanDigits, $options: 'i' } },
       );
-      if (cleanDigits.length >= 10) {
-        const last10 = cleanDigits.slice(-10);
-        orConditions.push(
-          { driverNumber: { $regex: last10, $options: 'i' } },
-          { customerNumber: { $regex: last10, $options: 'i' } },
-        );
-      }
+      const last10 = cleanDigits.slice(-10);
+      const flexiblePattern = last10.split('').join('\\D*');
+      orConditions.push(
+        { driverNumber: { $regex: last10, $options: 'i' } },
+        { customerNumber: { $regex: last10, $options: 'i' } },
+        { driverNumber: { $regex: flexiblePattern, $options: 'i' } },
+        { customerNumber: { $regex: flexiblePattern, $options: 'i' } },
+      );
     }
 
     // Match by driver document (resolves driverId, mobileNumber, driverName variations)
     const driverSearchOrs: any[] = [];
     if (cleanDigits.length >= 7) {
+      const last10 = cleanDigits.slice(-10);
+      const flexiblePattern = last10.split('').join('\\D*');
       driverSearchOrs.push(
         { mobileNumber: trimmed },
         { mobileNumber: { $regex: cleanDigits, $options: 'i' } },
+        { mobileNumber: { $regex: flexiblePattern, $options: 'i' } },
       );
     }
     if (escaped.length >= 2) {
@@ -314,9 +330,12 @@ export class RideService {
     // Match by customer document (resolves mobileNumber, accountNumber, customerName)
     const customerSearchOrs: any[] = [];
     if (cleanDigits.length >= 7) {
+      const last10 = cleanDigits.slice(-10);
+      const flexiblePattern = last10.split('').join('\\D*');
       customerSearchOrs.push(
         { mobileNumber: trimmed },
         { mobileNumber: { $regex: cleanDigits, $options: 'i' } },
+        { mobileNumber: { $regex: flexiblePattern, $options: 'i' } },
         { accountNumber: trimmed },
         { accountNumber: { $regex: cleanDigits, $options: 'i' } },
       );
@@ -350,7 +369,10 @@ export class RideService {
           orConditions.push({ customerNumber: c.accountNumber });
         }
         const custName = (c as any).fullName || (c as any).name || (c as any).customerName;
-        if (custName) {
+        const isGenericName =
+          !custName ||
+          /^(ivr\s*customer|customer|guest|user|unknown)$/i.test(custName.trim());
+        if (custName && !isGenericName) {
           orConditions.push({
             customerName: {
               $regex: custName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
@@ -380,8 +402,14 @@ export class RideService {
 
       const andFilters: any[] = [];
 
-      // 1. Driver-specific filter (supports driverId, driverNumber, driver)
-      const driverParam = query.driverId || query.driverNumber || query.driver;
+      // 1. Driver-specific filter (supports driverId, driverNumber, driver, driverName, driverPhone)
+      const driverParam =
+        query.driverId ||
+        query.driverNumber ||
+        query.driver ||
+        query.driverName ||
+        query.driverPhone ||
+        query.driverMobile;
       if (driverParam) {
         const driverConditions = await this.buildDriverMatchConditions(
           String(driverParam),
@@ -391,9 +419,15 @@ export class RideService {
         }
       }
 
-      // 2. Customer-specific filter (supports customerId, customerNumber, customer)
+      // 2. Customer-specific filter (supports customerId, customerNumber, customer, customerName, phone)
       const customerParam =
-        query.customerId || query.customerNumber || query.customer;
+        query.customerId ||
+        query.customerNumber ||
+        query.customer ||
+        query.customerName ||
+        query.customerPhone ||
+        query.phoneNumber ||
+        query.phone;
       if (customerParam) {
         const customerConditions = await this.buildCustomerMatchConditions(
           String(customerParam),
@@ -459,7 +493,12 @@ export class RideService {
       }
 
       // 4. Queue / Direction filter (B5)
-      const queueParam = query.queueName || query.queueType || query.queue;
+      const queueParam =
+        query.queueName ||
+        query.queueType ||
+        query.queue ||
+        query.direction ||
+        query.assignQueue;
       if (queueParam) {
         const queueUpper = String(queueParam).trim().toUpperCase();
         if (queueUpper === 'LOCAL' || queueUpper === '1') {
@@ -577,9 +616,21 @@ export class RideService {
       }
 
       // 7. General search filter (comprehensive multi-entity match: driver, customer, phone variations, tripNumber)
-      if (query.search) {
+      const searchParam =
+        query.search ||
+        query.q ||
+        query.query ||
+        query.keyword ||
+        query.searchQuery ||
+        query.searchTerm ||
+        query.searchValue ||
+        query.term ||
+        query.text ||
+        query.filter;
+
+      if (searchParam) {
         const searchConditions = await this.buildSearchConditions(
-          String(query.search),
+          String(searchParam),
         );
         if (searchConditions.length > 0) {
           andFilters.push({ $or: searchConditions });
