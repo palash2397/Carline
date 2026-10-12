@@ -113,6 +113,9 @@ export class Ride {
 
   @Prop({ type: Date })
   fareOverrideAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const RideSchema = SchemaFactory.createForClass(Ride);

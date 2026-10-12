@@ -86,6 +86,48 @@ export class RideController {
     description: 'Filter rides by Customer ID or phone number',
   })
   @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter rides starting from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter rides up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter rides for a single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'paymentStatus',
+    required: false,
+    enum: ['PENDING', 'COMPLETED', 'FAILED'],
+    description: 'Filter rides by payment status',
+  })
+  @ApiQuery({
+    name: 'paymentType',
+    required: false,
+    enum: ['CASH', 'CREDIT_CARD', 'ACCOUNT'],
+    description: 'Filter rides by payment method',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    type: String,
+    description: 'Field to sort by (default: createdAt)',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default: desc)',
+  })
+  @ApiQuery({
     name: 'includeCounts',
     required: false,
     type: Boolean,

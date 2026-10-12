@@ -42,17 +42,28 @@ export class CustomerService {
       const limit = parseInt(query.limit) || 10;
       const skip = (page - 1) * limit;
 
-      const searchFilter: any = {};
+      const andFilters: any[] = [];
+
       if (query.search) {
         const trimmed = String(query.search).trim();
         const cleanDigits = trimmed.replace(/\D/g, '');
         const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const words = trimmed.split(/\s+/).filter((w) => w.length > 1);
 
         const orConditions: any[] = [
           { fullName: { $regex: escaped, $options: 'i' } },
           { email: { $regex: escaped, $options: 'i' } },
           { accountNumber: { $regex: escaped, $options: 'i' } },
+          { fullAddress: { $regex: escaped, $options: 'i' } },
+          { address: { $regex: escaped, $options: 'i' } },
         ];
+
+        if (words.length > 1) {
+          const wordRegex = words
+            .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*');
+          orConditions.push({ fullName: { $regex: wordRegex, $options: 'i' } });
+        }
 
         // If numeric ID
         const numId = Number(trimmed);
@@ -86,20 +97,85 @@ export class CustomerService {
           });
         }
 
-        searchFilter.$or = orConditions;
+        andFilters.push({ $or: orConditions });
+      }
+
+      // Date filter (fromDate, toDate, date)
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
+      if (fromParam || toParam || singleDate) {
+        let start: Date | null = null;
+        let end: Date | null = null;
+        if (singleDate) {
+          start = new Date(singleDate);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(singleDate);
+          end.setHours(23, 59, 59, 999);
+        } else {
+          if (fromParam) {
+            const d = new Date(fromParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(0, 0, 0, 0);
+              start = d;
+            }
+          }
+          if (toParam) {
+            const d = new Date(toParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(23, 59, 59, 999);
+              end = d;
+            }
+          }
+        }
+        const dateCond: any = {};
+        if (start) dateCond.$gte = start;
+        if (end) dateCond.$lte = end;
+        if (Object.keys(dateCond).length > 0) {
+          andFilters.push({ createdAt: dateCond });
+        }
+      }
+
+      // Credit filter
+      if (query.hasCredit !== undefined && query.hasCredit !== null && query.hasCredit !== '') {
+        const hasCreditBool = query.hasCredit === true || query.hasCredit === 'true';
+        if (hasCreditBool) {
+          andFilters.push({ credit: { $gt: 0 } });
+        } else {
+          andFilters.push({ credit: { $lte: 0 } });
+        }
+      }
+
+      const searchFilter: any =
+        andFilters.length > 1
+          ? { $and: andFilters }
+          : andFilters.length === 1
+            ? andFilters[0]
+            : {};
+
+      const sortField = query.sortBy || query.sortField || 'customerId';
+      const sortDirection: 1 | -1 =
+        String(query.sortOrder || query.sortDirection || '').toLowerCase() ===
+          'desc' || query.sortOrder === '-1' || query.sortOrder === -1
+          ? -1
+          : 1;
+      const sortQuery: any = { [sortField]: sortDirection };
+      if (sortField !== '_id') {
+        sortQuery._id = -1;
       }
 
       const total = await this.customerModel.countDocuments(searchFilter);
       const data = await this.customerModel
         .find(searchFilter)
-        .sort({ createdAt: -1, _id: -1 })
+        .sort(sortQuery)
         .skip(skip)
         .limit(limit)
         .exec();
 
       return new ApiResponse(
         200,
-        { data, total, page, limit },
+        { data, total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
         Msg.CUSTOMERS_FETCHED,
       );
     } catch (error) {

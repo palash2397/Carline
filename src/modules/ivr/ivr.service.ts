@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
@@ -328,11 +328,7 @@ export class IvrService {
         (activeRide.paymentStatus === PaymentStatus.COMPLETED ||
           activeRide.paymentStatus === 'COMPLETED' ||
           activeRide.rideStatus === RideStatus.COMPLETED ||
-          activeRide.rideStatus === 'COMPLETED' ||
-          activeRide.selectedZone ||
-          activeRide.rideCompleteDateTime ||
-          activeRide.rideStatus === RideStatus.PAYMENT_PENDING ||
-          activeRide.rideStatus === 'PAYMENT_PENDING')
+          activeRide.rideStatus === 'COMPLETED')
       ) {
         return new ApiResponse(
           400,
@@ -342,7 +338,7 @@ export class IvrService {
             rideStatus: activeRide.rideStatus,
             paymentStatus: activeRide.paymentStatus,
           },
-          'Cannot cancel trip once destination zone is selected or ride has completed.',
+          'Cannot cancel trip once payment has already been completed.',
         );
       }
 
@@ -455,7 +451,7 @@ export class IvrService {
           );
         } else if (
           activeRide.rideStatus === RideStatus.STARTED &&
-          (dto.dtmfInput === '3' || dto.dtmfInput === '9')
+          (dto.dtmfInput === '3' || dto.dtmfInput === '9' || dto.dtmfInput === '8')
         ) {
           activeRide.rideStatus = RideStatus.CANCELLED;
           await activeRide.save();
@@ -497,6 +493,7 @@ export class IvrService {
           if (!activeRide.selectedZone) {
             if (
               dto.dtmfInput === '9' ||
+              dto.dtmfInput === '8' ||
               dto.action === 'CANCEL_TRIP' ||
               dto.action === 'CANCEL'
             ) {
@@ -761,19 +758,25 @@ export class IvrService {
               { action: 'PROMPT_OVERRIDE_AMOUNT' },
               Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
             );
-          } else if (dto.dtmfInput === '9') {
+          } else if (dto.dtmfInput === '9' || dto.dtmfInput === '8') {
+            activeRide.rideStatus = RideStatus.CANCELLED;
+            await activeRide.save();
+            await this.cancelOtherCalls(activeRide.tripNumber);
+
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            await driver.save();
+
             return new ApiResponse(
               200,
               {
-                action: 'PLAY_PAYMENT_MENU',
-                menu: 'PAYMENT_OPTIONS',
-                calculatedFare: activeRide.rideAmount,
-                fareOverrideApplied: !!activeRide.fareOverrideApplied,
-                currency: 'USD',
-                message:
-                  'Trip cannot be cancelled after destination zone is confirmed. Please complete payment or collect cash.',
+                action: 'TRIP_CANCELLED',
+                tripNumber: activeRide.tripNumber,
+                workflowStage: 'CANCELLED',
+                rideStatus: 'CANCELLED',
               },
-              'Trip cannot be cancelled after destination zone is confirmed. Please collect cash or complete payment.',
+              Msg.IVR_TRIP_CANCELLED,
             );
           } else if (dto.dtmfInput === '0') {
             return new ApiResponse(
@@ -1183,10 +1186,100 @@ export class IvrService {
     }
   }
 
+  private lastSelfHealTime = 0;
+
+  private async healStaleAndFinishedDriverRides(): Promise<void> {
+    const now = Date.now();
+    // Throttle self-healing sweep to run at most once every 10s to prevent database load
+    if (now - this.lastSelfHealTime < 10000) return;
+    this.lastSelfHealTime = now;
+
+    try {
+      const stuckDrivers = await this.driverModel.find({
+        $or: [
+          { isLoggedIn: true },
+          { loginLogout: { $in: ['START', 'LOGIN'] } },
+        ],
+        isAvailable: false,
+      });
+
+      if (!stuckDrivers || stuckDrivers.length === 0) return;
+
+      const activeRideIds = stuckDrivers
+        .map((d) => d.activeRideId)
+        .filter((id) => id && isValidObjectId(id));
+
+      const ridesMap = new Map<string, any>();
+      if (activeRideIds.length > 0) {
+        const foundRides = await this.rideModel
+          .find({ _id: { $in: activeRideIds } })
+          .select(
+            '_id tripNumber rideStatus paymentStatus rideCompleteDateTime createdAt',
+          )
+          .lean();
+        for (const r of foundRides) {
+          ridesMap.set(r._id.toString(), r);
+        }
+      }
+
+      for (const driver of stuckDrivers) {
+        let shouldFree = false;
+
+        if (!driver.activeRideId) {
+          shouldFree = true;
+        } else {
+          const linkedRide = ridesMap.get(driver.activeRideId.toString());
+          if (!linkedRide) {
+            shouldFree = true;
+          } else if (
+            linkedRide.rideStatus === RideStatus.COMPLETED ||
+            linkedRide.rideStatus === 'COMPLETED' ||
+            linkedRide.paymentStatus === 'COMPLETED' ||
+            linkedRide.rideStatus === RideStatus.CANCELLED ||
+            linkedRide.rideStatus === 'CANCELLED'
+          ) {
+            shouldFree = true;
+          } else if (linkedRide.rideCompleteDateTime) {
+            // Dropoff completed, driver is ready to receive new dispatches
+            shouldFree = true;
+          } else {
+            // Check if trip is stale (created > 45 minutes ago)
+            const ageMs = now - new Date(linkedRide.createdAt).getTime();
+            if (ageMs > 45 * 60 * 1000) {
+              shouldFree = true;
+            }
+          }
+        }
+
+        if (shouldFree) {
+          driver.activeRideId = '';
+          driver.isAvailable = true;
+          driver.ongoingRides = 'NO';
+          if (
+            driver.loginLogout === 'START' ||
+            driver.loginLogout === 'LOGIN'
+          ) {
+            driver.isLoggedIn = true;
+          }
+          await driver.save();
+        }
+      }
+    } catch (err) {
+      console.error('Error in healStaleAndFinishedDriverRides:', err);
+    }
+  }
+
   async getOnlineBatches(queueType?: string) {
     try {
+      // 1. Auto-heal any drivers whose rides completed, dropped off, or timed out
+      await this.healStaleAndFinishedDriverRides();
+
+      // 2. Query all active duty logged-in drivers
       const query: any = {
-        isLoggedIn: true,
+        $or: [
+          { isLoggedIn: true },
+          { loginLogout: { $in: ['START', 'LOGIN'] } },
+        ],
         isAvailable: true,
         status: { $nin: ['Block', 'INACTIVE'] },
       };
@@ -1198,25 +1291,56 @@ export class IvrService {
           normalized === 'LOCAL' ||
           normalized === 'LOCAL_RIDES'
         ) {
-          query.$or = [
-            { queueType: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
-            { assignQueue: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+          query.$and = [
+            {
+              $or: [
+                {
+                  queueType: {
+                    $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'],
+                  },
+                },
+                {
+                  assignQueue: {
+                    $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'],
+                  },
+                },
+                { queueType: { $exists: false } },
+                { queueType: null },
+                { queueType: '' },
+              ],
+            },
           ];
         } else if (
           normalized === '2' ||
           normalized === 'LONG_DISTANCE' ||
           normalized === 'LONG_DISTANCE_RIDE'
         ) {
-          query.$or = [
+          query.$and = [
             {
-              queueType: {
-                $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'],
-              },
-            },
-            {
-              assignQueue: {
-                $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'],
-              },
+              $or: [
+                {
+                  queueType: {
+                    $in: [
+                      'LONG_DISTANCE',
+                      'Long_Distance_Ride',
+                      'BOTH',
+                      'All_Rides',
+                      'ALL',
+                    ],
+                  },
+                },
+                {
+                  assignQueue: {
+                    $in: [
+                      'LONG_DISTANCE',
+                      'Long_Distance_Ride',
+                      'BOTH',
+                      'All_Rides',
+                      'ALL',
+                    ],
+                  },
+                },
+              ],
             },
           ];
         } else if (
@@ -1227,9 +1351,13 @@ export class IvrService {
         ) {
           // Press 3 = BOTH: all available logged-in drivers are returned across all batches
         } else {
-          query.$or = [
-            { queueType: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
-            { assignQueue: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+          query.$and = [
+            {
+              $or: [
+                { queueType: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+                { assignQueue: { $in: [queueType, 'BOTH', 'All_Rides', 'ALL'] } },
+              ],
+            },
           ];
         }
       }
@@ -1242,8 +1370,14 @@ export class IvrService {
         countryCode: d.countryCode || '',
       });
 
+      // Drivers without an explicit batch (or batch !== 2, 3) default to Batch 1 so no driver is lost
       const batch1Drivers = eligibleDrivers
-        .filter((d) => d.batch === 1)
+        .filter(
+          (d) =>
+            !d.batch ||
+            d.batch === 1 ||
+            (d.batch !== 2 && d.batch !== 3),
+        )
         .map(mapDriver);
       const batch2Drivers = eligibleDrivers
         .filter((d) => d.batch === 2)
@@ -1323,13 +1457,19 @@ export class IvrService {
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
 
-      // If linked ride is already completed or paid, finalize and reset active ride
+      // If linked ride is already completed, paid, cancelled, or dropped off, finalize and reset active ride
       const isRidePaidOrCompleted =
         ride &&
         (ride.paymentStatus === PaymentStatus.COMPLETED ||
           ride.paymentStatus === 'COMPLETED' ||
           ride.rideStatus === RideStatus.COMPLETED ||
           ride.rideStatus === 'COMPLETED' ||
+          ride.rideStatus === RideStatus.CANCELLED ||
+          ride.rideStatus === 'CANCELLED' ||
+          !!ride.rideCompleteDateTime ||
+          ((ride as any)?.createdAt &&
+            Date.now() - new Date((ride as any).createdAt).getTime() >
+              45 * 60 * 1000) ||
           ![
             RideStatus.ACCEPTED,
             RideStatus.STARTED,
@@ -1422,8 +1562,24 @@ export class IvrService {
 
         // Auto-sync driver record if active ride is found
         if (ride) {
-          driver.activeRideId = ride._id.toString();
-          driver.isAvailable = false;
+          const isRideFinishedOrStale =
+            !!ride.rideCompleteDateTime ||
+            ride.rideStatus === RideStatus.COMPLETED ||
+            ride.rideStatus === 'COMPLETED' ||
+            ride.paymentStatus === 'COMPLETED' ||
+            ((ride as any)?.createdAt &&
+              Date.now() - new Date((ride as any).createdAt).getTime() >
+                45 * 60 * 1000);
+
+          if (isRideFinishedOrStale) {
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+          } else {
+            driver.activeRideId = ride._id.toString();
+            driver.isAvailable = false;
+            driver.ongoingRides = 'YES';
+          }
           await driver.save();
         }
       }

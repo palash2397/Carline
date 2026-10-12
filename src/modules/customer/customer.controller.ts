@@ -57,6 +57,36 @@ export class CustomerController {
     type: String,
     description: 'Search term to filter results',
   })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter customers created from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter customers created up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'hasCredit',
+    required: false,
+    type: Boolean,
+    description: 'Filter customers with credit balance (true or false)',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    type: String,
+    description: 'Field to sort by (default: customerId)',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['asc', 'desc'],
+    description: 'Sort direction (default: asc)',
+  })
   async getCustomers(@Query() query: any) {
     return this.customerService.getCustomers(query);
   }
