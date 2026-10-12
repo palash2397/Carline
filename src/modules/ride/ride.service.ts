@@ -706,34 +706,85 @@ export class RideService {
       await newRide.save();
 
       const driverQuery: any = {
-        isLoggedIn: true,
+        $or: [
+          { isLoggedIn: true },
+          { loginLogout: { $in: ['START', 'LOGIN'] } },
+        ],
         isAvailable: true,
         status: { $nin: ['Block', 'INACTIVE'] },
       };
 
       if (queueName === 'LOCAL') {
-        driverQuery.$or = [
-          { queueType: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
-          { assignQueue: { $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'] } },
+        driverQuery.$and = [
+          {
+            $or: [
+              {
+                queueType: {
+                  $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'],
+                },
+              },
+              {
+                assignQueue: {
+                  $in: ['LOCAL', 'Local_Rides', 'BOTH', 'All_Rides', 'ALL'],
+                },
+              },
+              { queueType: { $exists: false } },
+              { queueType: null },
+              { queueType: '' },
+            ],
+          },
         ];
       } else if (queueName === 'LONG_DISTANCE') {
-        driverQuery.$or = [
-          { queueType: { $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'] } },
-          { assignQueue: { $in: ['LONG_DISTANCE', 'Long_Distance_Ride', 'BOTH', 'All_Rides', 'ALL'] } },
+        driverQuery.$and = [
+          {
+            $or: [
+              {
+                queueType: {
+                  $in: [
+                    'LONG_DISTANCE',
+                    'Long_Distance_Ride',
+                    'BOTH',
+                    'All_Rides',
+                    'ALL',
+                  ],
+                },
+              },
+              {
+                assignQueue: {
+                  $in: [
+                    'LONG_DISTANCE',
+                    'Long_Distance_Ride',
+                    'BOTH',
+                    'All_Rides',
+                    'ALL',
+                  ],
+                },
+              },
+            ],
+          },
         ];
       } else if (queueName === 'BOTH') {
         // Press 3 = BOTH: all available logged-in drivers are eligible
       } else {
-        driverQuery.$or = [
-          { queueType: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
-          { assignQueue: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
+        driverQuery.$and = [
+          {
+            $or: [
+              { queueType: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
+              { assignQueue: { $in: [queueName, 'BOTH', 'All_Rides', 'ALL'] } },
+            ],
+          },
         ];
       }
 
       const eligibleDrivers = await this.driverModel.find(driverQuery);
 
       const batch1 = eligibleDrivers
-        .filter((d) => d.batch === 1)
+        .filter(
+          (d) =>
+            !d.batch ||
+            d.batch === 1 ||
+            (d.batch !== 2 && d.batch !== 3),
+        )
         .map((d) => d.mobileNumber);
       const batch2 = eligibleDrivers
         .filter((d) => d.batch === 2)
