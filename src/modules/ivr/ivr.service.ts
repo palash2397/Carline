@@ -758,18 +758,24 @@ export class IvrService {
               Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
             );
           } else if (dto.dtmfInput === '9') {
+            activeRide.rideStatus = RideStatus.CANCELLED;
+            await activeRide.save();
+            await this.cancelOtherCalls(activeRide.tripNumber);
+
+            driver.activeRideId = '';
+            driver.isAvailable = true;
+            driver.ongoingRides = 'NO';
+            await driver.save();
+
             return new ApiResponse(
               200,
               {
-                action: 'PLAY_PAYMENT_MENU',
-                menu: 'PAYMENT_OPTIONS',
-                calculatedFare: activeRide.rideAmount,
-                fareOverrideApplied: !!activeRide.fareOverrideApplied,
-                currency: 'USD',
-                message:
-                  'Trip cannot be cancelled after destination zone is confirmed. Please complete payment or collect cash.',
+                action: 'TRIP_CANCELLED',
+                tripNumber: activeRide.tripNumber,
+                workflowStage: 'CANCELLED',
+                rideStatus: 'CANCELLED',
               },
-              'Trip cannot be cancelled after destination zone is confirmed. Please collect cash or complete payment.',
+              Msg.IVR_TRIP_CANCELLED,
             );
           } else if (dto.dtmfInput === '0') {
             return new ApiResponse(
