@@ -451,7 +451,7 @@ export class IvrService {
           );
         } else if (
           activeRide.rideStatus === RideStatus.STARTED &&
-          (dto.dtmfInput === '3' || dto.dtmfInput === '9')
+          (dto.dtmfInput === '3' || dto.dtmfInput === '9' || dto.dtmfInput === '8')
         ) {
           activeRide.rideStatus = RideStatus.CANCELLED;
           await activeRide.save();
@@ -493,6 +493,7 @@ export class IvrService {
           if (!activeRide.selectedZone) {
             if (
               dto.dtmfInput === '9' ||
+              dto.dtmfInput === '8' ||
               dto.action === 'CANCEL_TRIP' ||
               dto.action === 'CANCEL'
             ) {
@@ -757,7 +758,7 @@ export class IvrService {
               { action: 'PROMPT_OVERRIDE_AMOUNT' },
               Msg.IVR_PROMPT_OVERRIDE_AMOUNT,
             );
-          } else if (dto.dtmfInput === '9') {
+          } else if (dto.dtmfInput === '9' || dto.dtmfInput === '8') {
             activeRide.rideStatus = RideStatus.CANCELLED;
             await activeRide.save();
             await this.cancelOtherCalls(activeRide.tripNumber);
