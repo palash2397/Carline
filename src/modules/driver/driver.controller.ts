@@ -56,7 +56,25 @@ export class DriverController {
     name: 'search',
     required: false,
     type: String,
-    description: 'Search term to filter results',
+    description: 'Search term to filter results by name, phone, or ID',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['AVAILABLE', 'ON_TRIP', 'OFFLINE', 'SIGNED_IN', 'ALL'],
+    description: 'Filter drivers by live operational status (B5)',
+  })
+  @ApiQuery({
+    name: 'queueType',
+    required: false,
+    enum: ['LOCAL', 'LONG_DISTANCE', 'BOTH'],
+    description: 'Filter drivers by queue assignment (B5)',
+  })
+  @ApiQuery({
+    name: 'includeCounts',
+    required: false,
+    type: Boolean,
+    description: 'Set true to include live operational KPI counts in the response',
   })
   @ApiQuery({
     name: 'batch',
