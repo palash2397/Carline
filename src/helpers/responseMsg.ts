@@ -277,4 +277,5 @@ export const Msg = {
   IVR_DRIVER_STATUS_FETCHED: 'Driver status fetched',
   IVR_MOBILE_NUMBER_REQUIRED: 'Mobile number is required',
   IVR_CUSTOMER_STATUS_FETCHED: 'Customer status fetched successfully',
+  IVR_CANNOT_ACCEPT_OWN_TRIP: 'Driver cannot accept their own ride booking',
 };

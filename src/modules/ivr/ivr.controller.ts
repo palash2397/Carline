@@ -40,8 +40,15 @@ export class IvrController {
   }
 
   @Get('/batches')
-  async getOnlineBatches(@Query('queueType') queueType: string) {
-    return this.ivrService.getOnlineBatches(queueType);
+  async getOnlineBatches(
+    @Query('queueType') queueType: string,
+    @Query('customerNumber') customerNumber?: string,
+    @Query('callerNumber') callerNumber?: string,
+  ) {
+    return this.ivrService.getOnlineBatches(
+      queueType,
+      customerNumber || callerNumber,
+    );
   }
 
   @Get('/driver/status/:number')
