@@ -1286,11 +1286,17 @@ export class IvrService {
             linkedRide.rideStatus === 'CANCELLED'
           ) {
             shouldFree = true;
-          } else if (linkedRide.rideCompleteDateTime) {
-            // Dropoff completed, driver is ready to receive new dispatches
-            shouldFree = true;
+          } else if (
+            linkedRide.rideStatus === RideStatus.PAYMENT_PENDING ||
+            linkedRide.rideStatus === 'PAYMENT_PENDING'
+          ) {
+            // Keep driver linked to settle payment unless abandoned > 45 minutes
+            const ageMs = now - new Date(linkedRide.createdAt).getTime();
+            if (ageMs > 45 * 60 * 1000) {
+              shouldFree = true;
+            }
           } else {
-            // Check if trip is stale (created > 45 minutes ago)
+            // Stale check for active rides older than 45 minutes
             const ageMs = now - new Date(linkedRide.createdAt).getTime();
             if (ageMs > 45 * 60 * 1000) {
               shouldFree = true;
@@ -1521,7 +1527,7 @@ export class IvrService {
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
 
-      // If linked ride is already completed, paid, cancelled, or dropped off, finalize and reset active ride
+      // If linked ride is already completed, paid, cancelled, or stale (> 45m), finalize and reset active ride
       const isRidePaidOrCompleted =
         ride &&
         (ride.paymentStatus === PaymentStatus.COMPLETED ||
@@ -1530,7 +1536,6 @@ export class IvrService {
           ride.rideStatus === 'COMPLETED' ||
           ride.rideStatus === RideStatus.CANCELLED ||
           ride.rideStatus === 'CANCELLED' ||
-          !!ride.rideCompleteDateTime ||
           ((ride as any)?.createdAt &&
             Date.now() - new Date((ride as any).createdAt).getTime() >
               45 * 60 * 1000) ||
@@ -1627,10 +1632,11 @@ export class IvrService {
         // Auto-sync driver record if active ride is found
         if (ride) {
           const isRideFinishedOrStale =
-            !!ride.rideCompleteDateTime ||
             ride.rideStatus === RideStatus.COMPLETED ||
             ride.rideStatus === 'COMPLETED' ||
             ride.paymentStatus === 'COMPLETED' ||
+            ride.rideStatus === RideStatus.CANCELLED ||
+            ride.rideStatus === 'CANCELLED' ||
             ((ride as any)?.createdAt &&
               Date.now() - new Date((ride as any).createdAt).getTime() >
                 45 * 60 * 1000);
