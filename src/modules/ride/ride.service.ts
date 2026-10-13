@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
 import { Ride, RideDocument } from './schema/ride.schema';
@@ -16,12 +16,21 @@ import axios from 'axios';
 
 @Injectable()
 export class RideService {
+  private readonly logger = new Logger(RideService.name);
+
   constructor(
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
     private readonly customerService: CustomerService,
   ) {}
+
+  private maskIdentifier(id?: string): string {
+    if (!id) return 'N/A';
+    const trimmed = String(id).trim();
+    if (trimmed.length <= 6) return '***';
+    return `${trimmed.slice(0, 3)}***${trimmed.slice(-3)}`;
+  }
 
   private async buildDriverMatchConditions(
     driverIdentifier: string,
@@ -865,43 +874,121 @@ export class RideService {
         'IVR Customer',
       );
 
-      // Prevent duplicate booking if customer already has an active ride in progress
       const cleanCustomerDigits = (dto.customerNumber || '')
         .replace(/\D/g, '')
         .slice(-10);
+
+      const rawCorrelationId = (
+        dto.idempotencyKey ||
+        dto.requestId ||
+        dto.callSid ||
+        dto.callId ||
+        dto.sessionId ||
+        ''
+      ).trim();
+
+      const correlationId =
+        rawCorrelationId || (dto.recordingUrl ? dto.recordingUrl.trim() : '');
+
+      // 1. Check for Exact Retry of same request (Idempotency correlation)
+      let retryRide: RideDocument | null = null;
+      if (rawCorrelationId) {
+        retryRide = await this.rideModel
+          .findOne({
+            idempotencyKey: rawCorrelationId,
+          })
+          .sort({ createdAt: -1 });
+      } else if (dto.recordingUrl && dto.recordingUrl.trim()) {
+        retryRide = await this.rideModel
+          .findOne({
+            recordingUrl: dto.recordingUrl.trim(),
+          })
+          .sort({ createdAt: -1 });
+      }
+
+      // Fallback exact retry: ONLY when no explicit correlation ID / recording URL is provided,
+      // and identical request arrives from same customer/queue within 15 seconds
+      if (
+        !rawCorrelationId &&
+        !dto.recordingUrl &&
+        !retryRide &&
+        cleanCustomerDigits &&
+        cleanCustomerDigits.length >= 7
+      ) {
+        retryRide = await this.rideModel
+          .findOne({
+            customerNumber: { $regex: `${cleanCustomerDigits}$` },
+            queueName: this.normalizeQueueName(dto.queueName),
+            rideStatus: RideStatus.PENDING,
+            createdAt: { $gte: new Date(Date.now() - 15 * 1000) },
+          })
+          .sort({ createdAt: -1 });
+      }
+
+      if (retryRide) {
+        const maskedCorrelation = this.maskIdentifier(
+          correlationId || retryRide.tripNumber,
+        );
+        this.logger.log(
+          `[IVR_BOOK_REUSE] reason="EXACT_RETRY_IDEMPOTENCY" tripNumber="${retryRide.tripNumber}" rideStatus="${retryRide.rideStatus}" correlationId="${maskedCorrelation}"`,
+        );
+        return new ApiResponse(
+          200,
+          {
+            isExisting: true,
+            newRide: retryRide,
+            tripNumber: retryRide.tripNumber,
+          },
+          'Ride request reused (exact retry)',
+        );
+      }
+
+      // 2. Preserve active-trip protection for ACCEPTED/STARTED/payment-active rides
+      // (Do NOT block or reuse on PENDING rides based on phone number alone)
       if (cleanCustomerDigits && cleanCustomerDigits.length >= 7) {
         const existingActiveRide = await this.rideModel
           .findOne({
             customerNumber: { $regex: `${cleanCustomerDigits}$` },
             rideStatus: {
               $in: [
-                RideStatus.PENDING,
                 RideStatus.ACCEPTED,
+                RideStatus.DRIVER_FOUND,
+                RideStatus.DRIVER_ARRIVED,
                 RideStatus.STARTED,
+                RideStatus.ONGOING,
                 RideStatus.PAYMENT_PENDING,
-                'PENDING',
                 'ACCEPTED',
+                'DRIVER_FOUND',
+                'DRIVER_ARRIVED',
                 'STARTED',
+                'ONGOING',
                 'PAYMENT_PENDING',
               ],
             },
-            createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+            createdAt: { $gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
           })
           .sort({ createdAt: -1 });
 
         if (existingActiveRide) {
+          const maskedCorrelation = this.maskIdentifier(
+            correlationId || existingActiveRide.tripNumber,
+          );
+          this.logger.log(
+            `[IVR_BOOK_REUSE] reason="ACTIVE_TRIP_IN_PROGRESS" tripNumber="${existingActiveRide.tripNumber}" rideStatus="${existingActiveRide.rideStatus}" correlationId="${maskedCorrelation}"`,
+          );
           return new ApiResponse(
             200,
             {
+              isExisting: true,
               newRide: existingActiveRide,
               tripNumber: existingActiveRide.tripNumber,
-              isExisting: true,
             },
             'Customer already has an active ride in progress',
           );
         }
       }
 
+      // 3. Fresh booking request: create new PENDING ride
       const tripNumber = `TRIP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
 
       const lastRide = await this.rideModel.findOne().sort({ rideId: -1 });
@@ -918,11 +1005,7 @@ export class RideService {
           cleanCustomerPhone &&
           cleanDriverPhone === cleanCustomerPhone
         ) {
-          return new ApiResponse(
-            400,
-            {},
-            Msg.IVR_CANNOT_ACCEPT_OWN_TRIP,
-          );
+          return new ApiResponse(400, {}, Msg.IVR_CANNOT_ACCEPT_OWN_TRIP);
         }
 
         driverData = await this.driverModel.findOne({
@@ -951,6 +1034,7 @@ export class RideService {
         payment: null,
         paymentType: null,
         paymentStatus: PaymentStatus.PENDING,
+        idempotencyKey: correlationId || undefined,
       });
 
       await newRide.save();
@@ -961,7 +1045,20 @@ export class RideService {
         await driverData.save();
       }
 
-      return new ApiResponse(201, { newRide, tripNumber }, Msg.RIDE_BOOKED);
+      const maskedCorrelation = this.maskIdentifier(correlationId || tripNumber);
+      this.logger.log(
+        `[IVR_BOOK_NEW] reason="FRESH_BOOKING" tripNumber="${tripNumber}" rideStatus="${initialStatus}" correlationId="${maskedCorrelation}"`,
+      );
+
+      return new ApiResponse(
+        200,
+        {
+          isExisting: false,
+          newRide,
+          tripNumber,
+        },
+        Msg.RIDE_BOOKED,
+      );
     } catch (error) {
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
