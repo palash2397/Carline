@@ -19,12 +19,21 @@ export class IvrDriverActionDto {
 
   @ApiProperty({
     example: 'CANCEL_TRIP',
-    description: 'Driver action: CANCEL_TRIP or OVERRIDE_FARE',
+    description: 'Driver action: CANCEL_TRIP, OVERRIDE_FARE, CONFIRM_ZONE, CHANGE_ZONE, BACK_TO_ZONE',
     required: false,
   })
   @IsOptional()
   @IsString()
   action?: string;
+
+  @ApiProperty({ example: 'TRIP-123456', required: false })
+  @IsOptional()
+  @IsString()
+  tripNumber?: string;
+
+  @ApiProperty({ example: 2, required: false, description: 'Zone number (1-4) or string' })
+  @IsOptional()
+  zone?: any;
 
   @ApiProperty({ example: 2500, description: 'Override fare in integer cents (e.g. 2500 = $25.00)', required: false })
   @IsOptional()

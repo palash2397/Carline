@@ -248,9 +248,37 @@ export class IvrService {
         );
       }
 
-      // Locate active ride
+      // Locate active ride (prioritize explicit tripNumber if supplied)
       let activeRide: RideDocument | null = null;
-      if (driver.activeRideId) {
+      if (dto.tripNumber && typeof dto.tripNumber === 'string') {
+        const foundTrip = await this.rideModel.findOne({
+          tripNumber: dto.tripNumber.trim(),
+        });
+        if (foundTrip) {
+          activeRide = foundTrip;
+          if (
+            !driver.activeRideId ||
+            driver.activeRideId !== activeRide._id.toString()
+          ) {
+            driver.activeRideId = activeRide._id.toString();
+            driver.isAvailable = false;
+            driver.ongoingRides = 'YES';
+            if (!driver.isLoggedIn) {
+              driver.isLoggedIn = true;
+              driver.loginLogout = 'START';
+            }
+            await driver.save();
+          }
+        }
+      }
+
+      const hasValidActiveRideId =
+        !activeRide &&
+        driver.activeRideId &&
+        driver.activeRideId !== 'null' &&
+        isValidObjectId(driver.activeRideId);
+
+      if (hasValidActiveRideId) {
         activeRide = await this.rideModel.findById(driver.activeRideId);
         if (
           activeRide &&
@@ -267,6 +295,9 @@ export class IvrService {
           await driver.save();
           activeRide = null;
         }
+      } else if (!activeRide && driver.activeRideId) {
+        driver.activeRideId = '';
+        await driver.save();
       }
 
       if (!activeRide) {
@@ -294,12 +325,14 @@ export class IvrService {
           .sort({ createdAt: -1 });
 
         if (!activeRide) {
+          const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
           activeRide = await this.rideModel
             .findOne({
               ...driverFilter,
               rideStatus: {
                 $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
               },
+              createdAt: { $gte: fourHoursAgo },
             })
             .sort({ createdAt: -1 });
         }
@@ -394,6 +427,32 @@ export class IvrService {
         return this.handleFareOverride(driver, activeRide, dto);
       }
 
+      // Explicit Zone actions: CONFIRM_ZONE, CHANGE_ZONE, SELECT_ZONE, BACK_TO_ZONE
+      const isZoneAction =
+        dto.action === 'CONFIRM_ZONE' ||
+        dto.action === 'CHANGE_ZONE' ||
+        dto.action === 'SELECT_ZONE' ||
+        (dto.zone !== undefined &&
+          dto.zone !== null &&
+          !isCancelAction &&
+          !isOverrideAction);
+
+      const isBackToZoneAction =
+        dto.action === 'BACK_TO_ZONE' ||
+        dto.action === 'BACK' ||
+        dto.action === 'ZONE_MENU';
+
+      if (activeRide && (isZoneAction || isBackToZoneAction)) {
+        if (isBackToZoneAction) {
+          return this.handleBackToZone(activeRide);
+        }
+        return this.handleZoneSelectionAndFare(
+          driver,
+          activeRide,
+          dto.zone !== undefined && dto.zone !== null ? dto.zone : dto.dtmfInput,
+        );
+      }
+
       if (activeRide) {
         if (!dto.dtmfInput) {
           if (activeRide.rideStatus === RideStatus.ACCEPTED) {
@@ -403,6 +462,33 @@ export class IvrService {
               Msg.IVR_PLAY_START_CANCEL_MENU,
             );
           } else if (activeRide.rideStatus === RideStatus.STARTED) {
+            if (
+              dto.action === 'FINISH' ||
+              dto.action === 'FINISH_TRIP' ||
+              dto.action === 'COMPLETE_TRIP'
+            ) {
+              activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+              activeRide.rideCompleteDateTime = new Date().toISOString();
+              if (driver) {
+                activeRide.driverId = driver._id.toString();
+                activeRide.driverNumber = driver.mobileNumber;
+                activeRide.driverName = driver.driverName;
+              }
+              await activeRide.save();
+              await driver.save();
+              return new ApiResponse(
+                200,
+                {
+                  action: 'SHOW_ZONE_MENU',
+                  menu: 'ZONE_SELECTION',
+                  workflowStage: 'ZONE_SELECTION',
+                  tripNumber: activeRide.tripNumber,
+                  rideStatus: 'PAYMENT_PENDING',
+                  currency: 'USD',
+                },
+                Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+              );
+            }
             return new ApiResponse(
               200,
               { menu: 'FINISH' },
@@ -496,7 +582,10 @@ export class IvrService {
             );
           } else if (
             activeRide.rideStatus === RideStatus.STARTED &&
-            dto.dtmfInput === '2'
+            (dto.dtmfInput === '2' ||
+              dto.action === 'FINISH' ||
+              dto.action === 'FINISH_TRIP' ||
+              dto.action === 'COMPLETE_TRIP')
           ) {
             activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
             activeRide.rideCompleteDateTime = new Date().toISOString();
@@ -509,10 +598,21 @@ export class IvrService {
             await driver.save();
             return new ApiResponse(
               200,
-              { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+              {
+                action: 'SHOW_ZONE_MENU',
+                menu: 'ZONE_SELECTION',
+                workflowStage: 'ZONE_SELECTION',
+                tripNumber: activeRide.tripNumber,
+                rideStatus: 'PAYMENT_PENDING',
+                currency: 'USD',
+              },
               Msg.IVR_PLAY_ZONE_SELECTION_MENU,
             );
           } else if (activeRide.rideStatus === RideStatus.PAYMENT_PENDING) {
+            if (dto.dtmfInput === '0' || dto.dtmfInput === '*') {
+              return this.handleBackToZone(activeRide);
+            }
+
             // If Zone has not been selected yet, driver is selecting Zone (1, 2, 3, or 4)
             if (!activeRide.selectedZone) {
               if (
@@ -543,49 +643,30 @@ export class IvrService {
               if (!['1', '2', '3', '4'].includes(dto.dtmfInput)) {
                 return new ApiResponse(
                   200,
-                  { action: 'PLAY_ZONE_MENU', menu: 'ZONE_SELECTION' },
+                  {
+                    action: 'SHOW_ZONE_MENU',
+                    menu: 'ZONE_SELECTION',
+                    workflowStage: 'ZONE_SELECTION',
+                    tripNumber: activeRide.tripNumber,
+                    rideStatus: 'PAYMENT_PENDING',
+                    currency: 'USD',
+                  },
                   Msg.IVR_PLAY_ZONE_SELECTION_MENU,
                 );
               }
-              let durationMinutes = 0;
-              if (
-                activeRide.rideStartDateTime &&
-                activeRide.rideCompleteDateTime
-              ) {
-                const start = new Date(activeRide.rideStartDateTime).getTime();
-                const end = new Date(activeRide.rideCompleteDateTime).getTime();
-                durationMinutes = Math.ceil((end - start) / 60000);
-              }
 
-              const fareDetails = await this.pricingService.calculateZoneFare(
+              return this.handleZoneSelectionAndFare(
+                driver,
+                activeRide,
                 dto.dtmfInput,
-                durationMinutes,
-                activeRide.rideStartDateTime,
-              );
-
-              activeRide.selectedZone = fareDetails.zone;
-              activeRide.rideAmount = fareDetails.calculatedFare;
-              activeRide.originalCalculatedFare = fareDetails.calculatedFare;
-              await activeRide.save();
-
-              return new ApiResponse(
-                200,
-                {
-                  action: 'PLAY_PAYMENT_MENU',
-                  menu: 'PAYMENT_OPTIONS',
-                  durationMinutes,
-                  calculatedFare: fareDetails.calculatedFare,
-                  selectedZone: fareDetails.zone,
-                  currency: fareDetails.currency,
-                },
-                Msg.IVR_FARE_CALCULATED_PROMPT(
-                  durationMinutes,
-                  fareDetails.calculatedFare,
-                ),
               );
             }
 
-            if (dto.dtmfInput === '1') {
+            if (
+              dto.dtmfInput === '1' ||
+              dto.action === 'PAY_CASH' ||
+              dto.action === 'CASH'
+            ) {
               activeRide.paymentType = PaymentType.CASH;
               activeRide.paymentStatus = PaymentStatus.COMPLETED;
               activeRide.rideStatus = RideStatus.COMPLETED;
@@ -609,10 +690,27 @@ export class IvrService {
               );
               return new ApiResponse(
                 200,
-                { action: 'SAY_PAYMENT_CASH_SUCCESS' },
+                {
+                  action: 'SAY_PAYMENT_CASH_SUCCESS',
+                  tripNumber: activeRide.tripNumber,
+                  rideStatus: 'COMPLETED',
+                  workflowStage: 'COMPLETED',
+                  selectedZone: activeRide.selectedZone
+                    ? parseInt(String(activeRide.selectedZone).replace(/\D/g, '')) || activeRide.selectedZone
+                    : null,
+                  zone: activeRide.selectedZone,
+                  fare: activeRide.rideAmount,
+                  calculatedFare: activeRide.rideAmount,
+                  currency: 'USD',
+                },
                 Msg.RIDE_COMPLETED,
               );
-            } else if (dto.dtmfInput === '2') {
+            } else if (
+              dto.dtmfInput === '2' ||
+              dto.action === 'PAY_CARD' ||
+              dto.action === 'CARD' ||
+              dto.action === 'CREDIT_CARD'
+            ) {
               activeRide.paymentType = PaymentType.CREDIT_CARD;
               await activeRide.save();
               return new ApiResponse(
@@ -620,8 +718,15 @@ export class IvrService {
                 {
                   action: 'PROMPT_CARD_DETAILS',
                   menu: 'CARD_ENTRY',
+                  workflowStage: 'AWAITING_CARD_DETAILS',
                   tripNumber: activeRide.tripNumber,
+                  rideStatus: 'PAYMENT_PENDING',
                   calculatedFare: activeRide.rideAmount,
+                  fare: activeRide.rideAmount,
+                  selectedZone: activeRide.selectedZone
+                    ? parseInt(String(activeRide.selectedZone).replace(/\D/g, '')) || activeRide.selectedZone
+                    : null,
+                  zone: activeRide.selectedZone,
                   currency: 'USD',
                 },
                 Msg.IVR_ENTER_CARD_DETAILS,
@@ -802,22 +907,8 @@ export class IvrService {
                 },
                 Msg.IVR_TRIP_CANCELLED,
               );
-            } else if (dto.dtmfInput === '0') {
-              (activeRide as any).selectedZone = undefined;
-              activeRide.rideAmount = 0;
-              (activeRide as any).originalCalculatedFare = undefined;
-              await activeRide.save();
-              return new ApiResponse(
-                200,
-                {
-                  action: 'PLAY_ZONE_MENU',
-                  menu: 'ZONE_SELECTION',
-                  workflowStage: 'ZONE_SELECTION',
-                  tripNumber: activeRide.tripNumber,
-                  tripId: activeRide._id,
-                },
-                Msg.IVR_PLAY_ZONE_SELECTION_MENU,
-              );
+            } else if (dto.dtmfInput === '0' || dto.dtmfInput === '*') {
+              return this.handleBackToZone(activeRide);
             } else {
               return new ApiResponse(
                 200,
@@ -838,10 +929,19 @@ export class IvrService {
           }
         }
       } else {
-        if (!dto.dtmfInput) {
+        const normalizedAction = (dto.action || '').toUpperCase().trim();
+        const input = (dto.dtmfInput || '').trim();
+
+        if (!input && !normalizedAction) {
           return new ApiResponse(
             200,
-            { menu: 'LOGIN_LOGOUT' },
+            {
+              action: 'PLAY_LOGIN_MENU',
+              menu: 'LOGIN_LOGOUT',
+              workflowStage: driver.isLoggedIn ? 'LOGGED_IN' : 'IDLE',
+              isLoggedIn: driver.isLoggedIn,
+              queueType: driver.queueType,
+            },
             Msg.IVR_PLAY_LOGIN_MENU,
           );
         }
@@ -854,17 +954,45 @@ export class IvrService {
           );
         }
 
-        if (dto.dtmfInput === '4' || dto.action === 'LOGOUT') {
+        const isLogout =
+          input === '4' ||
+          normalizedAction === 'LOGOUT' ||
+          normalizedAction === 'STOP';
+
+        const isLoginLocal =
+          input === '1' ||
+          normalizedAction === 'LOGIN_LOCAL' ||
+          normalizedAction === 'LOCAL';
+
+        const isLoginLongDistance =
+          input === '2' ||
+          normalizedAction === 'LOGIN_LONG_DISTANCE' ||
+          normalizedAction === 'LONG_DISTANCE';
+
+        const isLoginBoth =
+          input === '3' ||
+          normalizedAction === 'LOGIN_BOTH' ||
+          normalizedAction === 'BOTH';
+
+        const isGenericLogin =
+          normalizedAction === 'LOGIN' || normalizedAction === 'START';
+
+        if (isLogout) {
           driver.isLoggedIn = false;
           driver.isAvailable = false;
           driver.loginLogout = 'STOP';
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'SAY_LOGGED_OUT' },
+            {
+              action: 'SAY_LOGGED_OUT',
+              menu: 'LOGIN_LOGOUT',
+              workflowStage: 'IDLE',
+              isLoggedIn: false,
+            },
             Msg.USER_LOGGED_OUT,
           );
-        } else if (dto.dtmfInput === '1') {
+        } else if (isLoginLocal) {
           driver.isLoggedIn = true;
           driver.isAvailable = true;
           driver.queueType = 'LOCAL';
@@ -873,10 +1001,15 @@ export class IvrService {
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'SAY_LOGGED_IN', queueType: 'LOCAL' },
+            {
+              action: 'SAY_LOGGED_IN',
+              queueType: 'LOCAL',
+              workflowStage: 'LOGGED_IN',
+              isLoggedIn: true,
+            },
             Msg.USER_LOGIN,
           );
-        } else if (dto.dtmfInput === '2') {
+        } else if (isLoginLongDistance) {
           driver.isLoggedIn = true;
           driver.isAvailable = true;
           driver.queueType = 'LONG_DISTANCE';
@@ -885,10 +1018,15 @@ export class IvrService {
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'SAY_LOGGED_IN', queueType: 'LONG_DISTANCE' },
+            {
+              action: 'SAY_LOGGED_IN',
+              queueType: 'LONG_DISTANCE',
+              workflowStage: 'LOGGED_IN',
+              isLoggedIn: true,
+            },
             Msg.USER_LOGIN,
           );
-        } else if (dto.dtmfInput === '3') {
+        } else if (isLoginBoth || isGenericLogin) {
           driver.isLoggedIn = true;
           driver.isAvailable = true;
           driver.queueType = 'BOTH';
@@ -897,7 +1035,12 @@ export class IvrService {
           await driver.save();
           return new ApiResponse(
             200,
-            { action: 'SAY_LOGGED_IN', queueType: 'BOTH' },
+            {
+              action: 'SAY_LOGGED_IN',
+              queueType: 'BOTH',
+              workflowStage: 'LOGGED_IN',
+              isLoggedIn: true,
+            },
             Msg.USER_LOGIN,
           );
         }
@@ -916,6 +1059,122 @@ export class IvrService {
         Msg.SERVER_ERROR,
       );
     }
+  }
+
+  private async handleZoneSelectionAndFare(
+    driver: DriverDocument,
+    activeRide: RideDocument,
+    rawZone: any,
+  ) {
+    if (rawZone === undefined || rawZone === null || rawZone === '') {
+      return new ApiResponse(
+        200,
+        {
+          action: 'SHOW_ZONE_MENU',
+          menu: 'ZONE_SELECTION',
+          workflowStage: 'ZONE_SELECTION',
+          tripNumber: activeRide.tripNumber,
+          tripId: activeRide._id,
+        },
+        Msg.IVR_PLAY_ZONE_SELECTION_MENU,
+      );
+    }
+
+    let numericZone = 1;
+    if (typeof rawZone === 'number') {
+      numericZone = rawZone;
+    } else {
+      const digits = String(rawZone).replace(/\D/g, '');
+      numericZone = digits ? parseInt(digits, 10) : 1;
+    }
+
+    if (!activeRide.rideCompleteDateTime) {
+      activeRide.rideCompleteDateTime = new Date().toISOString();
+    }
+
+    let durationMinutes = 0;
+    if (activeRide.rideStartDateTime && activeRide.rideCompleteDateTime) {
+      const start = new Date(activeRide.rideStartDateTime).getTime();
+      const end = new Date(activeRide.rideCompleteDateTime).getTime();
+      durationMinutes = Math.max(0, Math.ceil((end - start) / 60000));
+    }
+
+    const fareDetails = await this.pricingService.calculateZoneFare(
+      String(rawZone),
+      durationMinutes,
+      activeRide.rideStartDateTime,
+    );
+
+    activeRide.selectedZone = fareDetails.zone;
+    activeRide.rideAmount = fareDetails.calculatedFare;
+    activeRide.calculatedFare = fareDetails.calculatedFare;
+    activeRide.originalCalculatedFare = fareDetails.calculatedFare;
+    activeRide.fareCalculatedAt = new Date();
+    activeRide.fareOverrideApplied = false;
+    (activeRide as any).fareOverrideAmount = undefined;
+    (activeRide as any).fareOverrideDifference = undefined;
+    activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+    activeRide.paymentStatus = PaymentStatus.PENDING;
+    (activeRide as any).paymentType = undefined;
+
+    if (driver) {
+      activeRide.driverId = driver._id.toString();
+      activeRide.driverNumber = driver.mobileNumber;
+      activeRide.driverName = driver.driverName;
+    }
+
+    await activeRide.save();
+
+    return new ApiResponse(
+      200,
+      {
+        tripNumber: activeRide.tripNumber,
+        rideStatus: 'PAYMENT_PENDING',
+        workflowStage: 'AWAITING_PAYMENT',
+        selectedZone: typeof rawZone === 'number' ? rawZone : numericZone,
+        zone: fareDetails.zone,
+        fare: fareDetails.calculatedFare,
+        calculatedFare: fareDetails.calculatedFare,
+        durationMinutes,
+        currency: fareDetails.currency || 'USD',
+        action: 'SAY_FARE_AND_PAYMENT_OPTIONS',
+        menu: 'PAYMENT_OPTIONS',
+      },
+      'Zone confirmed and fare calculated successfully',
+    );
+  }
+
+  private async handleBackToZone(activeRide: RideDocument) {
+    let numericSelectedZone = 1;
+    if (activeRide.selectedZone) {
+      const digits = String(activeRide.selectedZone).replace(/\D/g, '');
+      numericSelectedZone = digits ? parseInt(digits, 10) : 1;
+    }
+
+    // Reset any partial payment attempt
+    if (activeRide.paymentStatus !== PaymentStatus.COMPLETED) {
+      (activeRide as any).paymentType = undefined;
+      activeRide.rideStatus = RideStatus.PAYMENT_PENDING;
+      activeRide.paymentStatus = PaymentStatus.PENDING;
+      await activeRide.save();
+    }
+
+    return new ApiResponse(
+      200,
+      {
+        tripNumber: activeRide.tripNumber,
+        rideStatus: 'PAYMENT_PENDING',
+        workflowStage: 'ZONE_SELECTION',
+        selectedZone: numericSelectedZone,
+        zone: activeRide.selectedZone || 'ZONE 1',
+        fare: activeRide.rideAmount || activeRide.calculatedFare || 0,
+        calculatedFare: activeRide.calculatedFare || activeRide.rideAmount || 0,
+        currency: 'USD',
+        action: 'SHOW_ZONE_MENU',
+        menu: 'ZONE_SELECTION',
+      },
+      'Returned to zone selection menu',
+    );
   }
 
   private async handleFareOverride(
@@ -1146,7 +1405,13 @@ export class IvrService {
           if (existingLock.driverNumber === dto.driverNumber) {
             return new ApiResponse(
               200,
-              { action: 'SAY_ACCEPTED' },
+              {
+                action: 'SAY_ACCEPTED',
+                dispatchId: dto.dispatchId,
+                driverNumber: dto.driverNumber,
+                driverId: driver._id.toString(),
+                rideStatus: RideStatus.ACCEPTED,
+              },
               Msg.RIDE_ASSIGNED_TO_YOU,
             );
           } else {
@@ -1169,7 +1434,13 @@ export class IvrService {
 
         return new ApiResponse(
           200,
-          { action: 'SAY_ACCEPTED' },
+          {
+            action: 'SAY_ACCEPTED',
+            dispatchId: dto.dispatchId,
+            driverNumber: dto.driverNumber,
+            driverId: driver._id.toString(),
+            rideStatus: RideStatus.ACCEPTED,
+          },
           Msg.RIDE_ASSIGNED_TO_YOU,
         );
       } else if (dto.dtmfInput === '2') {
@@ -1250,7 +1521,13 @@ export class IvrService {
 
         return new ApiResponse(
           200,
-          { action: 'SAY_ACCEPTED' },
+          {
+            action: 'SAY_ACCEPTED',
+            tripNumber: dto.tripNumber,
+            driverNumber: dto.driverNumber,
+            driverId: driver._id.toString(),
+            rideStatus: RideStatus.ACCEPTED,
+          },
           Msg.RIDE_ASSIGNED_TO_YOU,
         );
       } else if (dto.dtmfInput === '2') {
@@ -1335,8 +1612,9 @@ export class IvrService {
           linkedRide.rideStatus === RideStatus.PAYMENT_PENDING ||
           linkedRide.rideStatus === 'PAYMENT_PENDING'
         ) {
-          // Keep driver linked to settle payment and do NOT free driver while in PAYMENT_PENDING
-          shouldFree = false;
+          // Keep driver linked to settle payment, but auto-free if abandoned/stale (> 45 minutes)
+          const ageMs = now - new Date(linkedRide.createdAt).getTime();
+          shouldFree = ageMs > 45 * 60 * 1000;
         } else {
           // Stale check for active rides older than 45 minutes
           const ageMs = now - new Date(linkedRide.createdAt).getTime();
@@ -1558,7 +1836,12 @@ export class IvrService {
       let activeTripData: any = null;
       let completedTripData: any = null;
 
-      let ride = driver.activeRideId
+      const hasValidActiveRideId =
+        driver.activeRideId &&
+        driver.activeRideId !== 'null' &&
+        isValidObjectId(driver.activeRideId);
+
+      let ride = hasValidActiveRideId
         ? await this.rideModel.findById(driver.activeRideId)
         : null;
 
@@ -1631,6 +1914,9 @@ export class IvrService {
         driver.isAvailable = false;
         driver.ongoingRides = 'YES';
         await driver.save();
+      } else if (driver.activeRideId && !hasValidActiveRideId) {
+        driver.activeRideId = '';
+        await driver.save();
       }
 
       // Fallback: If activeRideId was not linked on driver, search by driverId or mobile number
@@ -1660,12 +1946,14 @@ export class IvrService {
           .sort({ createdAt: -1 });
 
         if (!ride) {
+          const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
           ride = await this.rideModel
             .findOne({
               ...driverFilter,
               rideStatus: {
                 $in: [RideStatus.ACCEPTED, 'ACCEPTED'],
               },
+              createdAt: { $gte: fourHoursAgo },
             })
             .sort({ createdAt: -1 });
         }
@@ -1761,12 +2049,18 @@ export class IvrService {
           workflowStage = 'ASSIGNED_NOT_STARTED';
           activeTripData = {
             ...baseTripData,
+            workflowStage,
+            action: 'PLAY_START_OR_CANCEL_MENU',
+            menu: 'START_OR_CANCEL',
             fareOverrideApplied: false,
           };
         } else if (ride.rideStatus === RideStatus.STARTED) {
           workflowStage = 'IN_PROGRESS';
           activeTripData = {
             ...baseTripData,
+            workflowStage,
+            action: 'PLAY_COMPLETE_MENU',
+            menu: 'IN_PROGRESS',
             fareOverrideApplied: false,
           };
         } else if (ride.rideStatus === RideStatus.PAYMENT_PENDING) {
@@ -1850,16 +2144,21 @@ export class IvrService {
             fareOverrideApplied: !!ride.fareOverrideApplied,
           };
         }
-      } else if (completedTripData) {
-        workflowStage = 'COMPLETED';
-        activeTripData = completedTripData;
       }
 
       const hasActiveTrip = !!ride && !!activeTripData;
       const isPendingPayment = ride?.rideStatus === RideStatus.PAYMENT_PENDING;
 
       let topLevelMessage = Msg.IVR_DRIVER_STATUS_FETCHED;
-      if (isPendingPayment) {
+      let topLevelAction = activeTripData?.action;
+      let topLevelMenu = activeTripData?.menu;
+
+      if (!hasActiveTrip) {
+        workflowStage = driver.isLoggedIn ? 'LOGGED_IN' : 'IDLE';
+        topLevelAction = 'PLAY_LOGIN_MENU';
+        topLevelMenu = 'LOGIN_LOGOUT';
+        topLevelMessage = Msg.IVR_PLAY_LOGIN_MENU;
+      } else if (isPendingPayment) {
         topLevelMessage = !ride?.selectedZone
           ? Msg.IVR_PLAY_ZONE_SELECTION_MENU
           : Msg.IVR_PLAY_PAYMENT_OPTIONS_MENU;
@@ -1879,8 +2178,8 @@ export class IvrService {
           serviceType: driver.queueType,
           available: hasActiveTrip ? false : driver.isAvailable,
           workflowStage,
-          action: activeTripData?.action,
-          menu: activeTripData?.menu,
+          action: topLevelAction,
+          menu: topLevelMenu,
           activeTrip: hasActiveTrip,
           trip: hasActiveTrip ? activeTripData : completedTripData || null,
           activeTripData: activeTripData || null,

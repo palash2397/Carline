@@ -265,7 +265,8 @@ export const Msg = {
     'Account payment failed. Customer does not have a valid credit card on file or sufficient account balance. Please select another payment option.',
   IVR_PROMPT_OVERRIDE_AMOUNT: 'Prompt driver for custom override amount',
   IVR_RETURNED_TO_PAYMENT_MENU: 'Returned to payment menu',
-  IVR_PLAY_LOGIN_MENU: 'Play login menu',
+  IVR_PLAY_LOGIN_MENU:
+    'Please select queue to log in: 1 for Local, 2 for Long Distance, 3 for Both, or 4 to Logout.',
   IVR_DRIVER_NOT_LOGGED_IN: 'Driver is not logged in',
   IVR_TRIP_ASSIGNED_TO_OTHER_DRIVER: 'Trip is assigned to another driver',
   IVR_ZONE_FARE_REQUIRED_FOR_OVERRIDE:

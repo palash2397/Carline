@@ -95,7 +95,13 @@ export class Ride {
   @Prop()
   cardMasked: string;
 
-  // Fare Override Audit Fields
+  // Zone and Fare Calculation Audit Fields
+  @Prop({ type: Number })
+  calculatedFare: number;
+
+  @Prop({ type: Date })
+  fareCalculatedAt: Date;
+
   @Prop({ type: Number })
   originalCalculatedFare: number;
 
