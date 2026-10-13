@@ -2227,64 +2227,68 @@ export class IvrService {
         });
       }
 
-      // 1. Look for active/ongoing ride
+      // 1. Look for active/ongoing ride WITH A VALID ASSIGNED DRIVER (last 4 hours)
+      // Excludes PENDING rides (unassigned) and rides without a valid driver
       const activeRide = await this.rideModel
         .findOne({
           $or: customerPhoneQueries,
           rideStatus: {
             $in: [
-              RideStatus.PENDING,
               RideStatus.ACCEPTED,
+              RideStatus.DRIVER_FOUND,
+              RideStatus.DRIVER_ARRIVED,
               RideStatus.STARTED,
+              RideStatus.ONGOING,
               RideStatus.PAYMENT_PENDING,
-              'PENDING',
               'ACCEPTED',
+              'DRIVER_FOUND',
+              'DRIVER_ARRIVED',
               'STARTED',
+              'ONGOING',
               'PAYMENT_PENDING',
             ],
           },
+          $and: [
+            {
+              $or: [
+                { driverNumber: { $exists: true, $ne: '' } },
+                { driverId: { $exists: true, $ne: '' } },
+              ],
+            },
+          ],
           paymentStatus: { $ne: 'COMPLETED' },
+          createdAt: { $gte: new Date(Date.now() - 4 * 60 * 60 * 1000) },
         })
         .sort({ createdAt: -1 });
 
-      // 2. Fallback: look for most recent ride if no active ride
-      let recentRide: RideDocument | null = null;
-      if (!activeRide) {
-        recentRide = await this.rideModel
-          .findOne({
-            $or: customerPhoneQueries,
-          })
-          .sort({ createdAt: -1 });
-      }
-
-      const rideToReport = activeRide || recentRide;
       let driverDetails: any = null;
+      let tripData: any = null;
 
-      if (rideToReport) {
+      if (activeRide) {
         let driver: DriverDocument | null = null;
-        if (rideToReport.driverId) {
+        if (activeRide.driverId) {
           driver = await this.driverModel
-            .findById(rideToReport.driverId)
+            .findById(activeRide.driverId)
             .catch(() => null);
           if (!driver) {
-            const numId = Number(rideToReport.driverId);
+            const numId = Number(activeRide.driverId);
             if (!isNaN(numId)) {
               driver = await this.driverModel.findOne({ driverId: numId });
             }
           }
         }
-        if (!driver && rideToReport.driverNumber) {
+        if (!driver && activeRide.driverNumber) {
           driver = await this.findDriverByPhoneNumber(
-            rideToReport.driverNumber,
+            activeRide.driverNumber,
           );
         }
 
         if (driver) {
           driverDetails = {
             driverId: driver.driverId || driver._id,
-            driverName: driver.driverName || rideToReport.driverName || '',
+            driverName: driver.driverName || activeRide.driverName || '',
             mobileNumber:
-              driver.mobileNumber || rideToReport.driverNumber || '',
+              driver.mobileNumber || activeRide.driverNumber || '',
             vehicleNumber: driver.vehicleNumber || '',
             makeModel: driver.makeModel || '',
             color: driver.color || '',
@@ -2292,11 +2296,11 @@ export class IvrService {
             batch: driver.batch || 1,
             countryCode: driver.countryCode || '',
           };
-        } else if (rideToReport.driverName || rideToReport.driverNumber) {
+        } else if (activeRide.driverName || activeRide.driverNumber) {
           driverDetails = {
-            driverId: rideToReport.driverId || '',
-            driverName: rideToReport.driverName || '',
-            mobileNumber: rideToReport.driverNumber || '',
+            driverId: activeRide.driverId || '',
+            driverName: activeRide.driverName || '',
+            mobileNumber: activeRide.driverNumber || '',
             vehicleNumber: '',
             makeModel: '',
             color: '',
@@ -2305,33 +2309,30 @@ export class IvrService {
             countryCode: '',
           };
         }
-      }
 
-      let tripData: any = null;
-      if (rideToReport) {
         tripData = {
-          tripId: rideToReport._id,
-          tripNumber: rideToReport.tripNumber,
+          tripId: activeRide._id,
+          tripNumber: activeRide.tripNumber,
           customerName:
-            rideToReport.customerName || (customer ? customer.fullName : ''),
-          customerNumber: rideToReport.customerNumber || mobileNumber,
-          queueName: rideToReport.queueName || '',
-          recordingUrl: rideToReport.recordingUrl || '',
-          rideStatus: rideToReport.rideStatus,
-          status: rideToReport.rideStatus,
-          paymentStatus: rideToReport.paymentStatus || 'PENDING',
-          paymentType: rideToReport.paymentType || null,
-          rideAmount: rideToReport.rideAmount || 0,
-          fareAmount: rideToReport.rideAmount || 0,
-          selectedZone: rideToReport.selectedZone || '',
-          driverAwayMinutes: rideToReport.driverAwayMinutes || '',
-          rideStartDateTime: rideToReport.rideStartDateTime || '',
-          rideCompleteDateTime: rideToReport.rideCompleteDateTime || '',
+            activeRide.customerName || (customer ? customer.fullName : ''),
+          customerNumber: activeRide.customerNumber || mobileNumber,
+          queueName: activeRide.queueName || '',
+          recordingUrl: activeRide.recordingUrl || '',
+          rideStatus: activeRide.rideStatus,
+          status: activeRide.rideStatus,
+          paymentStatus: activeRide.paymentStatus || 'PENDING',
+          paymentType: activeRide.paymentType || null,
+          rideAmount: activeRide.rideAmount || 0,
+          fareAmount: activeRide.rideAmount || 0,
+          selectedZone: activeRide.selectedZone || '',
+          driverAwayMinutes: activeRide.driverAwayMinutes || '',
+          rideStartDateTime: activeRide.rideStartDateTime || '',
+          rideCompleteDateTime: activeRide.rideCompleteDateTime || '',
           driver: driverDetails,
         };
       }
 
-      const hasActiveTrip = !!activeRide && tripData !== null;
+      const hasActiveTrip = !!activeRide && !!driverDetails;
 
       return new ApiResponse(
         200,
@@ -2351,8 +2352,8 @@ export class IvrService {
               }
             : null,
           activeTrip: hasActiveTrip,
-          trip: tripData,
-          driver: driverDetails,
+          trip: hasActiveTrip ? tripData : null,
+          driver: hasActiveTrip ? driverDetails : null,
         },
         Msg.IVR_CUSTOMER_STATUS_FETCHED,
       );
