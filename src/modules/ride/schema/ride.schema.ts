@@ -120,6 +120,9 @@ export class Ride {
   @Prop({ type: Date })
   fareOverrideAt: Date;
 
+  @Prop()
+  idempotencyKey?: string;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -134,3 +137,4 @@ RideSchema.index({ rideStatus: 1, createdAt: -1 });
 RideSchema.index({ paymentStatus: 1, createdAt: -1 });
 RideSchema.index({ createdAt: -1 });
 RideSchema.index({ selectedZone: 1 });
+RideSchema.index({ idempotencyKey: 1 }, { sparse: true });

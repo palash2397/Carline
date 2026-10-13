@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Query,
@@ -182,7 +183,14 @@ export class RideController {
     description: 'API key for IVR access',
     required: true,
   })
-  async bookIvrRide(@Body() bookIvrRideDto: BookIvrRideDto) {
+  async bookIvrRide(
+    @Body() bookIvrRideDto: BookIvrRideDto,
+    @Headers('x-idempotency-key') headerIdempotencyKey?: string,
+    @Headers('x-request-id') headerRequestId?: string,
+  ) {
+    if (!bookIvrRideDto.idempotencyKey && (headerIdempotencyKey || headerRequestId)) {
+      bookIvrRideDto.idempotencyKey = headerIdempotencyKey || headerRequestId;
+    }
     return this.rideService.bookIvrRide(bookIvrRideDto);
   }
 

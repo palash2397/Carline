@@ -26,4 +26,29 @@ export class BookIvrRideDto {
   @IsOptional()
   @IsString()
   rideStart?: string;
+
+  @ApiProperty({ example: 'req-12345-abc', required: false })
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
+
+  @ApiProperty({ example: 'req-12345-abc', required: false })
+  @IsOptional()
+  @IsString()
+  requestId?: string;
+
+  @ApiProperty({ example: 'CA123456789', required: false })
+  @IsOptional()
+  @IsString()
+  callSid?: string;
+
+  @ApiProperty({ example: 'call-12345', required: false })
+  @IsOptional()
+  @IsString()
+  callId?: string;
+
+  @ApiProperty({ example: 'sess-12345', required: false })
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
 }
