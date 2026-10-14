@@ -1636,6 +1636,20 @@ export class IvrService {
     }
   }
 
+  private normalizeCountryCode(countryCode?: string | number): string {
+    const cc = (countryCode || '').toString().trim();
+    if (cc === '91' || cc === '+91' || cc.toLowerCase() === 'india') {
+      return '+91';
+    }
+    if (cc === '1' || cc === '+1' || cc === '0' || !cc) {
+      return '+1';
+    }
+    if (!cc.startsWith('+')) {
+      return `+${cc}`;
+    }
+    return cc;
+  }
+
   async getOnlineBatches(queueType?: string, callerNumber?: string) {
     try {
       // 1. Auto-heal any drivers whose rides completed, dropped off, or timed out
@@ -1753,7 +1767,7 @@ export class IvrService {
       const mapDriver = (d: DriverDocument) => ({
         driverId: d.driverId,
         mobileNumber: d.mobileNumber,
-        countryCode: d.countryCode || '',
+        countryCode: this.normalizeCountryCode(d.countryCode),
       });
 
       // Drivers without an explicit batch (or batch !== 2, 3) default to Batch 1 so no driver is lost
@@ -2294,7 +2308,7 @@ export class IvrService {
             color: driver.color || '',
             licenceNumber: driver.licenceNumber || '',
             batch: driver.batch || 1,
-            countryCode: driver.countryCode || '',
+            countryCode: this.normalizeCountryCode(driver.countryCode),
           };
         } else if (activeRide.driverName || activeRide.driverNumber) {
           driverDetails = {
