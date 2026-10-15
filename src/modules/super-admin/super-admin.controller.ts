@@ -95,6 +95,36 @@ export class SuperAdminController {
     enum: ['All Statuses', 'Active', 'Suspended', 'Inactive'],
   })
   @ApiQuery({ name: 'city', required: false, type: String })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter companies created from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter companies created up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter companies created on a single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter start time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter end time (HH:mm or HH:mm:ss)',
+  })
   async getCompanies(@Query() query: any) {
     return this.superAdminService.getCompanies(query);
   }

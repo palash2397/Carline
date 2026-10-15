@@ -108,6 +108,7 @@ export const Msg = {
   DRIVER_DELETED: 'Driver deleted successfully',
   DRIVER_EARNINGS_HISTORY_FETCHED:
     'Driver earnings history fetched successfully',
+  DRIVER_SHIFTS_FETCHED: 'Driver shift history fetched successfully',
   DRIVER_SETTLEMENT_PROCESSED: 'Driver settlement processed successfully',
 
   // Route

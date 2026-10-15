@@ -93,10 +93,22 @@ export class RideController {
     description: 'Filter rides starting from date (YYYY-MM-DD or ISO string)',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter rides starting from time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'Filter rides up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter rides up to time (HH:mm or HH:mm:ss)',
   })
   @ApiQuery({
     name: 'date',

@@ -18,6 +18,7 @@ import { UserRole } from 'src/common/enums/user/role.enum';
 import { MailService } from '../mail/mail.service';
 import { getCompanyWelcomeEmailTemplate } from '../mail/template/company-welcome.template';
 import { generateRandomPassword, deleteOldFile } from '../../helpers/index';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class SuperAdminService implements OnModuleInit {
@@ -512,6 +513,11 @@ export class SuperAdminService implements OnModuleInit {
 
       if (query.city && query.city !== 'All Cities') {
         filter['address.city'] = new RegExp(`^${query.city.trim()}$`, 'i');
+      }
+
+      const dateFilter = parseDateTimeRange(query, 'createdAt');
+      if (dateFilter.hasFilter && dateFilter.filter) {
+        Object.assign(filter, dateFilter.filter);
       }
 
       const total = await this.companyModel.countDocuments(filter);

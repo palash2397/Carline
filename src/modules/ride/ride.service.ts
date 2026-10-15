@@ -11,6 +11,7 @@ import { AdminDispatchDto } from './dto/admin-dispatch.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
 import { PaymentStatus } from 'src/common/enums/payment/payment-status';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 import axios from 'axios';
 
@@ -527,60 +528,25 @@ export class RideService {
         }
       }
 
-      // 5. Date range filter (supports fromDate/toDate, startDate/endDate, date)
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      if (fromParam || toParam || singleDate) {
-        let start: Date | null = null;
-        let end: Date | null = null;
-
-        if (singleDate) {
-          start = new Date(singleDate);
-          start.setUTCHours(0, 0, 0, 0);
-          end = new Date(singleDate);
-          end.setUTCHours(23, 59, 59, 999);
-        } else {
-          if (fromParam) {
-            const parsedStart = new Date(fromParam);
-            if (!isNaN(parsedStart.getTime())) {
-              start = parsedStart;
-              if (String(fromParam).length <= 10) {
-                start.setUTCHours(0, 0, 0, 0);
-              }
-            }
-          }
-          if (toParam) {
-            const parsedEnd = new Date(toParam);
-            if (!isNaN(parsedEnd.getTime())) {
-              end = parsedEnd;
-              if (String(toParam).length <= 10) {
-                end.setUTCHours(23, 59, 59, 999);
-              }
-            }
-          }
+      // 5. Date and time range filter (supports fromDate/toDate, fromTime/toTime, single date, ISO strings)
+      const dateRange = parseDateTimeRange(query, 'createdAt');
+      if (dateRange.hasFilter && dateRange.filter) {
+        const dateCond = dateRange.filter.createdAt;
+        const dateOrConditions: any[] = [{ createdAt: dateCond }];
+        const strCond: any = {};
+        if (dateCond.$gte) {
+          strCond.$gte = dateCond.$gte.toISOString();
         }
-
-        const dateCond: any = {};
-        if (start && !isNaN(start.getTime())) {
-          dateCond.$gte = start;
+        if (dateCond.$lte) {
+          strCond.$lte = dateCond.$lte.toISOString();
         }
-        if (end && !isNaN(end.getTime())) {
-          dateCond.$lte = end;
-        }
-
-        if (Object.keys(dateCond).length > 0) {
-          const dateOrConditions: any[] = [{ createdAt: dateCond }];
-          const strCond: any = {};
-          if (start) strCond.$gte = start.toISOString();
-          if (end) strCond.$lte = end.toISOString();
+        if (Object.keys(strCond).length > 0) {
           dateOrConditions.push(
             { rideStartDateTime: strCond },
             { rideCompleteDateTime: strCond },
           );
-          andFilters.push({ $or: dateOrConditions });
         }
+        andFilters.push({ $or: dateOrConditions });
       }
 
       // 6. Payment Status and Payment Type filters
@@ -906,31 +872,30 @@ export class RideService {
           .sort({ createdAt: -1 });
       }
 
-      // Fallback exact retry: ONLY when no explicit correlation ID / recording URL is provided,
-      // and identical request arrives from same customer/queue within 15 seconds
-      if (
-        !rawCorrelationId &&
-        !dto.recordingUrl &&
-        !retryRide &&
-        cleanCustomerDigits &&
-        cleanCustomerDigits.length >= 7
-      ) {
+      // Fallback de-duplication: If ANY request arrives for the same customer number while they already
+      // have a PENDING ride created within the last 3 minutes (180 seconds), reuse that pending ride
+      // to prevent duplicate trips from rapid customer callbacks, retries, or duplicate Telnyx webhooks.
+      if (!retryRide && cleanCustomerDigits && cleanCustomerDigits.length >= 7) {
         retryRide = await this.rideModel
           .findOne({
             customerNumber: { $regex: `${cleanCustomerDigits}$` },
-            queueName: this.normalizeQueueName(dto.queueName),
             rideStatus: RideStatus.PENDING,
-            createdAt: { $gte: new Date(Date.now() - 15 * 1000) },
+            createdAt: { $gte: new Date(Date.now() - 3 * 60 * 1000) },
           })
           .sort({ createdAt: -1 });
       }
 
       if (retryRide) {
+        if (dto.recordingUrl && dto.recordingUrl.trim() && !retryRide.recordingUrl) {
+          retryRide.recordingUrl = dto.recordingUrl.trim();
+          await retryRide.save();
+        }
+
         const maskedCorrelation = this.maskIdentifier(
           correlationId || retryRide.tripNumber,
         );
         this.logger.log(
-          `[IVR_BOOK_REUSE] reason="EXACT_RETRY_IDEMPOTENCY" tripNumber="${retryRide.tripNumber}" rideStatus="${retryRide.rideStatus}" correlationId="${maskedCorrelation}"`,
+          `[IVR_BOOK_REUSE] reason="RECENT_PENDING_TRIP_DEBOUNCE" tripNumber="${retryRide.tripNumber}" rideStatus="${retryRide.rideStatus}" correlationId="${maskedCorrelation}"`,
         );
         return new ApiResponse(
           200,
@@ -939,7 +904,7 @@ export class RideService {
             newRide: retryRide,
             tripNumber: retryRide.tripNumber,
           },
-          'Ride request reused (exact retry)',
+          'Customer already has a pending ride request being dispatched',
         );
       }
 

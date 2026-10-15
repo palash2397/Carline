@@ -3,6 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { IvrController } from './ivr.controller';
 import { IvrService } from './ivr.service';
 import { Driver, DriverSchema } from '../driver/schema/driver.schema';
+import {
+  DriverShift,
+  DriverShiftSchema,
+} from '../driver/schema/driver-shift.schema';
 import { Ride, RideSchema } from '../ride/schema/ride.schema';
 import { User, UserSchema } from '../user/schema/user.schema';
 import { Customer, CustomerSchema } from '../customer/schema/customer.schema';
@@ -14,6 +18,7 @@ import { PaymentModule } from '../payment/payment.module';
   imports: [
     MongooseModule.forFeature([
       { name: Driver.name, schema: DriverSchema },
+      { name: DriverShift.name, schema: DriverShiftSchema },
       { name: Ride.name, schema: RideSchema },
       { name: User.name, schema: UserSchema },
       { name: Customer.name, schema: CustomerSchema },

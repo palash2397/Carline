@@ -89,6 +89,36 @@ export class DriverController {
     description: 'Filter drivers by service type',
   })
   @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered starting from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter starting time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter ending time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered on single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
     name: 'sortBy',
     required: false,
     type: String,
@@ -143,11 +173,98 @@ export class DriverController {
     enum: ['ADJUSTMENT', 'SETTLEMENT', 'MANUAL_OVERRIDE'],
     description: 'Filter by action type',
   })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
+  })
   async getDriverEarningsHistory(
     @Param('id') id: string,
     @Query() query: any,
   ) {
     return this.driverService.getDriverEarningsHistory(id, query);
+  }
+
+  @Get('/:id/shifts')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (default: 20)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['ACTIVE', 'COMPLETED', 'ALL'],
+    description: 'Filter by shift status',
+  })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
+  })
+  async getDriverShifts(
+    @Param('id') id: string,
+    @Query() query: any,
+  ) {
+    return this.driverService.getDriverShifts(id, query);
   }
 
   @Get('/:id/earnings-range')
@@ -159,10 +276,28 @@ export class DriverController {
     description: 'Start date in YYYY-MM-DD or ISO string',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
   })
   @ApiQuery({
     name: 'page',
@@ -192,10 +327,28 @@ export class DriverController {
     description: 'Start date in YYYY-MM-DD or ISO string',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
   })
   async exportDriverEarningsRange(
     @Param('id') id: string,
