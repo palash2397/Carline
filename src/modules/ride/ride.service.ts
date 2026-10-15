@@ -906,31 +906,30 @@ export class RideService {
           .sort({ createdAt: -1 });
       }
 
-      // Fallback exact retry: ONLY when no explicit correlation ID / recording URL is provided,
-      // and identical request arrives from same customer/queue within 15 seconds
-      if (
-        !rawCorrelationId &&
-        !dto.recordingUrl &&
-        !retryRide &&
-        cleanCustomerDigits &&
-        cleanCustomerDigits.length >= 7
-      ) {
+      // Fallback de-duplication: If ANY request arrives for the same customer number while they already
+      // have a PENDING ride created within the last 3 minutes (180 seconds), reuse that pending ride
+      // to prevent duplicate trips from rapid customer callbacks, retries, or duplicate Telnyx webhooks.
+      if (!retryRide && cleanCustomerDigits && cleanCustomerDigits.length >= 7) {
         retryRide = await this.rideModel
           .findOne({
             customerNumber: { $regex: `${cleanCustomerDigits}$` },
-            queueName: this.normalizeQueueName(dto.queueName),
             rideStatus: RideStatus.PENDING,
-            createdAt: { $gte: new Date(Date.now() - 15 * 1000) },
+            createdAt: { $gte: new Date(Date.now() - 3 * 60 * 1000) },
           })
           .sort({ createdAt: -1 });
       }
 
       if (retryRide) {
+        if (dto.recordingUrl && dto.recordingUrl.trim() && !retryRide.recordingUrl) {
+          retryRide.recordingUrl = dto.recordingUrl.trim();
+          await retryRide.save();
+        }
+
         const maskedCorrelation = this.maskIdentifier(
           correlationId || retryRide.tripNumber,
         );
         this.logger.log(
-          `[IVR_BOOK_REUSE] reason="EXACT_RETRY_IDEMPOTENCY" tripNumber="${retryRide.tripNumber}" rideStatus="${retryRide.rideStatus}" correlationId="${maskedCorrelation}"`,
+          `[IVR_BOOK_REUSE] reason="RECENT_PENDING_TRIP_DEBOUNCE" tripNumber="${retryRide.tripNumber}" rideStatus="${retryRide.rideStatus}" correlationId="${maskedCorrelation}"`,
         );
         return new ApiResponse(
           200,
@@ -939,7 +938,7 @@ export class RideService {
             newRide: retryRide,
             tripNumber: retryRide.tripNumber,
           },
-          'Ride request reused (exact retry)',
+          'Customer already has a pending ride request being dispatched',
         );
       }
 

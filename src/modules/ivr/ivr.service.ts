@@ -1400,6 +1400,32 @@ export class IvrService {
           );
         }
 
+        // Guard: Prevent driver from taking a trip if they already have an active ride in progress
+        if (driver.activeRideId) {
+          const currentActiveRide = await this.rideModel.findById(driver.activeRideId);
+          if (
+            currentActiveRide &&
+            [
+              RideStatus.ACCEPTED,
+              RideStatus.DRIVER_FOUND,
+              RideStatus.DRIVER_ARRIVED,
+              RideStatus.STARTED,
+              RideStatus.ONGOING,
+              'ACCEPTED',
+              'DRIVER_FOUND',
+              'DRIVER_ARRIVED',
+              'STARTED',
+              'ONGOING',
+            ].includes(currentActiveRide.rideStatus)
+          ) {
+            return new ApiResponse(
+              400,
+              { action: 'SAY_ALREADY_ASSIGNED' },
+              Msg.RIDE_ALREADY_ASSIGNED,
+            );
+          }
+        }
+
         const existingLock = this.dispatchLocks.get(dto.dispatchId);
         if (existingLock) {
           if (existingLock.driverNumber === dto.driverNumber) {
@@ -1490,6 +1516,32 @@ export class IvrService {
             { action: 'SAY_CANNOT_ACCEPT_OWN_TRIP' },
             Msg.IVR_CANNOT_ACCEPT_OWN_TRIP,
           );
+        }
+
+        // Guard: Prevent driver from taking a trip if they already have an active ride in progress
+        if (driver.activeRideId && driver.activeRideId !== trip._id.toString()) {
+          const currentActiveRide = await this.rideModel.findById(driver.activeRideId);
+          if (
+            currentActiveRide &&
+            [
+              RideStatus.ACCEPTED,
+              RideStatus.DRIVER_FOUND,
+              RideStatus.DRIVER_ARRIVED,
+              RideStatus.STARTED,
+              RideStatus.ONGOING,
+              'ACCEPTED',
+              'DRIVER_FOUND',
+              'DRIVER_ARRIVED',
+              'STARTED',
+              'ONGOING',
+            ].includes(currentActiveRide.rideStatus)
+          ) {
+            return new ApiResponse(
+              400,
+              { action: 'SAY_ALREADY_ASSIGNED' },
+              Msg.RIDE_ALREADY_ASSIGNED,
+            );
+          }
         }
 
         const result = await this.rideModel.updateOne(
