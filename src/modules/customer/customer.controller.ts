@@ -70,6 +70,24 @@ export class CustomerController {
     description: 'Filter customers created up to date (YYYY-MM-DD or ISO string)',
   })
   @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter customers for a single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter start time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter end time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
     name: 'hasCredit',
     required: false,
     type: Boolean,
@@ -107,12 +125,41 @@ export class CustomerController {
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter balance history from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter balance history up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single day (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter start time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter end time (HH:mm or HH:mm:ss)',
+  })
   async getCustomerBalanceHistory(
     @Param('id') id: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query() query: any,
   ) {
-    return this.customerService.getBalanceHistory(id, { page, limit });
+    return this.customerService.getBalanceHistory(id, query);
   }
 
   @Get('/:id')

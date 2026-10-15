@@ -89,6 +89,36 @@ export class DriverController {
     description: 'Filter drivers by service type',
   })
   @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered starting from date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter starting time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered up to date (YYYY-MM-DD or ISO string)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter ending time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter drivers registered on single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
     name: 'sortBy',
     required: false,
     type: String,
@@ -143,6 +173,36 @@ export class DriverController {
     enum: ['ADJUSTMENT', 'SETTLEMENT', 'MANUAL_OVERRIDE'],
     description: 'Filter by action type',
   })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
+  })
   async getDriverEarningsHistory(
     @Param('id') id: string,
     @Query() query: any,
@@ -177,10 +237,28 @@ export class DriverController {
     description: 'Start date in YYYY-MM-DD or ISO string',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
   })
   async getDriverShifts(
     @Param('id') id: string,
@@ -198,10 +276,28 @@ export class DriverController {
     description: 'Start date in YYYY-MM-DD or ISO string',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
   })
   @ApiQuery({
     name: 'page',
@@ -231,10 +327,28 @@ export class DriverController {
     description: 'Start date in YYYY-MM-DD or ISO string',
   })
   @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Start time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
     name: 'toDate',
     required: false,
     type: String,
     description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'End time in HH:mm or HH:mm:ss',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter for a single date (YYYY-MM-DD)',
   })
   async exportDriverEarningsRange(
     @Param('id') id: string,

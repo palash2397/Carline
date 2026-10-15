@@ -124,6 +124,24 @@ export class PaymentController {
     description: 'Filter logs to date (YYYY-MM-DD or ISO string)',
   })
   @ApiQuery({
+    name: 'date',
+    required: false,
+    type: String,
+    description: 'Filter logs for a single date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'fromTime',
+    required: false,
+    type: String,
+    description: 'Filter logs start time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
+    name: 'toTime',
+    required: false,
+    type: String,
+    description: 'Filter logs end time (HH:mm or HH:mm:ss)',
+  })
+  @ApiQuery({
     name: 'sortBy',
     required: false,
     type: String,

@@ -27,6 +27,7 @@ import {
   normalizePhoneNumber,
   buildPhoneMatchConditions,
 } from 'src/common/utils/phone-formatter.util';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class DriverService {
@@ -321,6 +322,12 @@ export class DriverService {
             ],
           });
         }
+      }
+
+      // 5. Date and time range filter on driver registration (createdAt)
+      const dateRange = parseDateTimeRange(query, 'createdAt');
+      if (dateRange.hasFilter && dateRange.filter) {
+        andFilters.push(dateRange.filter);
       }
 
       const searchFilter: any =
@@ -978,40 +985,9 @@ export class DriverService {
         filter.actionType = query.actionType.toUpperCase();
       }
 
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      if (fromParam || toParam || singleDate) {
-        let start: Date | null = null;
-        let end: Date | null = null;
-        if (singleDate) {
-          start = new Date(singleDate);
-          start.setHours(0, 0, 0, 0);
-          end = new Date(singleDate);
-          end.setHours(23, 59, 59, 999);
-        } else {
-          if (fromParam) {
-            const d = new Date(fromParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(0, 0, 0, 0);
-              start = d;
-            }
-          }
-          if (toParam) {
-            const d = new Date(toParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(23, 59, 59, 999);
-              end = d;
-            }
-          }
-        }
-        const dateCond: any = {};
-        if (start) dateCond.$gte = start;
-        if (end) dateCond.$lte = end;
-        if (Object.keys(dateCond).length > 0) {
-          filter.createdAt = dateCond;
-        }
+      const dateRange = parseDateTimeRange(query, 'createdAt');
+      if (dateRange.hasFilter && dateRange.filter) {
+        filter.createdAt = dateRange.filter.createdAt;
       }
 
       const [total, history] = await Promise.all([
@@ -1193,41 +1169,9 @@ export class DriverService {
         filter.status = query.status.toUpperCase();
       }
 
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      if (fromParam || toParam || singleDate) {
-        let start: Date | null = null;
-        let end: Date | null = null;
-        if (singleDate) {
-          start = new Date(singleDate);
-          start.setHours(0, 0, 0, 0);
-          end = new Date(singleDate);
-          end.setHours(23, 59, 59, 999);
-        } else {
-          if (fromParam) {
-            const d = new Date(fromParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(0, 0, 0, 0);
-              start = d;
-            }
-          }
-          if (toParam) {
-            const d = new Date(toParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(23, 59, 59, 999);
-              end = d;
-            }
-          }
-        }
-        if (start && end) {
-          filter.loginTime = { $gte: start, $lte: end };
-        } else if (start) {
-          filter.loginTime = { $gte: start };
-        } else if (end) {
-          filter.loginTime = { $lte: end };
-        }
+      const dateRange = parseDateTimeRange(query, 'loginTime');
+      if (dateRange.hasFilter && dateRange.filter) {
+        filter.loginTime = dateRange.filter.loginTime;
       }
 
       const [total, rawShifts, allCompletedShifts] = await Promise.all([
@@ -1470,39 +1414,9 @@ export class DriverService {
         rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
       };
 
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      let startDate: Date | null = null;
-      let endDate: Date | null = null;
-
-      if (singleDate) {
-        const d1 = new Date(singleDate);
-        if (!isNaN(d1.getTime())) {
-          d1.setHours(0, 0, 0, 0);
-          startDate = d1;
-          const d2 = new Date(singleDate);
-          d2.setHours(23, 59, 59, 999);
-          endDate = d2;
-        }
-      } else {
-        if (fromParam) {
-          const d = new Date(fromParam);
-          if (!isNaN(d.getTime())) {
-            d.setHours(0, 0, 0, 0);
-            startDate = d;
-          }
-        }
-
-        if (toParam) {
-          const d = new Date(toParam);
-          if (!isNaN(d.getTime())) {
-            d.setHours(23, 59, 59, 999);
-            endDate = d;
-          }
-        }
-      }
+      const dateRange = parseDateTimeRange(query);
+      const startDate = dateRange.startDate;
+      const endDate = dateRange.endDate;
 
       if (startDate || endDate) {
         const dateCond: any = {};
@@ -1655,7 +1569,11 @@ export class DriverService {
           },
           period: {
             fromDate: query.fromDate || null,
+            fromTime: query.fromTime || null,
             toDate: query.toDate || null,
+            toTime: query.toTime || null,
+            startDate: startDate ? startDate.toISOString() : null,
+            endDate: endDate ? endDate.toISOString() : null,
             filterApplied: Boolean(startDate || endDate),
           },
           financialTotals: {

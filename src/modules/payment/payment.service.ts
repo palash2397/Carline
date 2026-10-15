@@ -16,6 +16,7 @@ import { Msg } from 'src/helpers/responseMsg';
 import { PaymentStatus } from 'src/common/enums/payment/payment-status';
 import { PaymentType } from 'src/common/enums/payment/payment-type';
 import { RideStatus } from 'src/common/enums/ride/ride-enum';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class PaymentService {
@@ -840,40 +841,9 @@ export class PaymentService {
         });
       }
 
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      if (fromParam || toParam || singleDate) {
-        let start: Date | null = null;
-        let end: Date | null = null;
-        if (singleDate) {
-          start = new Date(singleDate);
-          start.setHours(0, 0, 0, 0);
-          end = new Date(singleDate);
-          end.setHours(23, 59, 59, 999);
-        } else {
-          if (fromParam) {
-            const d = new Date(fromParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(0, 0, 0, 0);
-              start = d;
-            }
-          }
-          if (toParam) {
-            const d = new Date(toParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(23, 59, 59, 999);
-              end = d;
-            }
-          }
-        }
-        const dateCond: any = {};
-        if (start) dateCond.$gte = start;
-        if (end) dateCond.$lte = end;
-        if (Object.keys(dateCond).length > 0) {
-          andFilters.push({ createdAt: dateCond });
-        }
+      const dateFilter = parseDateTimeRange(query, 'createdAt');
+      if (dateFilter.hasFilter && dateFilter.filter) {
+        andFilters.push(dateFilter.filter);
       }
 
       const searchFilter: any =

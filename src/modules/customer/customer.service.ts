@@ -24,6 +24,7 @@ import {
   isValidPhoneNumber,
   buildPhoneMatchConditions,
 } from 'src/common/utils/phone-formatter.util';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class CustomerService {
@@ -100,41 +101,10 @@ export class CustomerService {
         andFilters.push({ $or: orConditions });
       }
 
-      // Date filter (fromDate, toDate, date)
-      const fromParam = query.fromDate || query.startDate || query.from;
-      const toParam = query.toDate || query.endDate || query.to;
-      const singleDate = query.date;
-
-      if (fromParam || toParam || singleDate) {
-        let start: Date | null = null;
-        let end: Date | null = null;
-        if (singleDate) {
-          start = new Date(singleDate);
-          start.setHours(0, 0, 0, 0);
-          end = new Date(singleDate);
-          end.setHours(23, 59, 59, 999);
-        } else {
-          if (fromParam) {
-            const d = new Date(fromParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(0, 0, 0, 0);
-              start = d;
-            }
-          }
-          if (toParam) {
-            const d = new Date(toParam);
-            if (!isNaN(d.getTime())) {
-              d.setHours(23, 59, 59, 999);
-              end = d;
-            }
-          }
-        }
-        const dateCond: any = {};
-        if (start) dateCond.$gte = start;
-        if (end) dateCond.$lte = end;
-        if (Object.keys(dateCond).length > 0) {
-          andFilters.push({ createdAt: dateCond });
-        }
+      // Date & time range filter (fromDate, toDate, date, fromTime, toTime)
+      const dateFilter = parseDateTimeRange(query, 'createdAt');
+      if (dateFilter.hasFilter && dateFilter.filter) {
+        andFilters.push(dateFilter.filter);
       }
 
       // Credit filter
@@ -696,6 +666,11 @@ export class CustomerService {
             : []),
         ],
       };
+
+      const dateFilter = parseDateTimeRange(query, 'createdAt');
+      if (dateFilter.hasFilter && dateFilter.filter) {
+        filter.createdAt = dateFilter.filter.createdAt;
+      }
 
       const [total, history] = await Promise.all([
         this.customerBalanceHistoryModel.countDocuments(filter),
