@@ -17,6 +17,10 @@ import {
   DriverEarningsAudit,
   DriverEarningsAuditDocument,
 } from './schema/driver-earnings-audit.schema';
+import {
+  DriverShift,
+  DriverShiftDocument,
+} from './schema/driver-shift.schema';
 
 import { UserRole } from 'src/common/enums/user/role.enum';
 import {
@@ -30,6 +34,8 @@ export class DriverService {
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
     @InjectModel(DriverEarningsAudit.name)
     private driverEarningsAuditModel: Model<DriverEarningsAuditDocument>,
+    @InjectModel(DriverShift.name)
+    private driverShiftModel: Model<DriverShiftDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
   ) {}
 
@@ -632,6 +638,8 @@ export class DriverService {
         }
       }
 
+      let shiftAction: 'LOGIN' | 'LOGOUT' | null = null;
+
       if (
         updateData.status === 'Block' ||
         updateData.status === 'INACTIVE'
@@ -640,6 +648,7 @@ export class DriverService {
         updateData.isAvailable = false;
         updateData.loginLogout = 'STOP';
         updateData.logoutTime = new Date().toISOString();
+        shiftAction = 'LOGOUT';
       } else if (
         updateData.loginLogout?.toUpperCase() === 'STOP' ||
         updateData.loginLogout?.toUpperCase() === 'LOGOUT' ||
@@ -649,6 +658,7 @@ export class DriverService {
         updateData.isLoggedIn = false;
         updateData.isAvailable = false;
         updateData.logoutTime = new Date().toISOString();
+        shiftAction = 'LOGOUT';
       } else if (
         updateData.loginLogout?.toUpperCase() === 'START' ||
         updateData.loginLogout?.toUpperCase() === 'LOGIN' ||
@@ -658,6 +668,7 @@ export class DriverService {
         updateData.isLoggedIn = true;
         updateData.isAvailable = true;
         updateData.loginTime = new Date().toISOString();
+        shiftAction = 'LOGIN';
       }
 
       const updatedDriver = await this.driverModel.findByIdAndUpdate(
@@ -665,6 +676,22 @@ export class DriverService {
         { $set: updateData },
         { new: true, runValidators: true },
       );
+
+      // Async shift tracking for admin updates
+      if (shiftAction === 'LOGIN' && !existingDriver.isLoggedIn) {
+        await this.recordLoginShift(
+          updatedDriver,
+          updatedDriver?.queueType,
+          'ADMIN',
+          'Logged in via Admin Dashboard',
+        );
+      } else if (shiftAction === 'LOGOUT' && existingDriver.isLoggedIn) {
+        await this.recordLogoutShift(
+          updatedDriver,
+          'ADMIN',
+          'Logged out via Admin Dashboard',
+        );
+      }
 
       return new ApiResponse(200, updatedDriver, Msg.DRIVER_UPDATED);
     } catch (error) {
@@ -1019,6 +1046,255 @@ export class DriverService {
       );
     } catch (error) {
       console.log(`Error while fetching driver earnings history:`, error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
+  async recordLoginShift(
+    driver: DriverDocument | any,
+    queueType?: string,
+    source: 'IVR' | 'ADMIN' | 'SYSTEM' = 'ADMIN',
+    notes?: string,
+  ): Promise<DriverShiftDocument | null> {
+    try {
+      if (!driver) return null;
+      const now = new Date();
+
+      // Close any previous dangling active shifts for this driver
+      const activeShifts = await this.driverShiftModel.find({
+        driverObjectId: driver._id.toString(),
+        status: 'ACTIVE',
+      });
+
+      for (const shift of activeShifts) {
+        shift.logoutTime = now;
+        shift.status = 'COMPLETED';
+        const diffMinutes = Math.max(
+          0,
+          Math.round(
+            (now.getTime() - new Date(shift.loginTime).getTime()) / 60000,
+          ),
+        );
+        shift.durationMinutes = diffMinutes;
+        if (!shift.notes && notes) shift.notes = notes;
+        await shift.save();
+      }
+
+      const newShift = new this.driverShiftModel({
+        driverObjectId: driver._id.toString(),
+        driverId: driver.driverId,
+        driverName: driver.driverName || '',
+        mobileNumber: driver.mobileNumber,
+        queueType: queueType || driver.queueType || 'BOTH',
+        loginTime: now,
+        status: 'ACTIVE',
+        source,
+        notes: notes || '',
+      });
+
+      return await newShift.save();
+    } catch (err) {
+      console.log('Error recording driver login shift:', err);
+      return null;
+    }
+  }
+
+  async recordLogoutShift(
+    driver: DriverDocument | any,
+    source: 'IVR' | 'ADMIN' | 'SYSTEM' = 'ADMIN',
+    notes?: string,
+  ): Promise<DriverShiftDocument | null> {
+    try {
+      if (!driver) return null;
+      const now = new Date();
+
+      const activeShift = await this.driverShiftModel
+        .findOne({
+          driverObjectId: driver._id.toString(),
+          status: 'ACTIVE',
+        })
+        .sort({ loginTime: -1 });
+
+      if (activeShift) {
+        activeShift.logoutTime = now;
+        activeShift.status = 'COMPLETED';
+        const diffMinutes = Math.max(
+          0,
+          Math.round(
+            (now.getTime() - new Date(activeShift.loginTime).getTime()) / 60000,
+          ),
+        );
+        activeShift.durationMinutes = diffMinutes;
+        if (notes) activeShift.notes = notes;
+        return await activeShift.save();
+      } else {
+        const fallbackLogin = driver.loginTime
+          ? new Date(driver.loginTime)
+          : now;
+        const diffMinutes = Math.max(
+          0,
+          Math.round((now.getTime() - fallbackLogin.getTime()) / 60000),
+        );
+        return await this.driverShiftModel.create({
+          driverObjectId: driver._id.toString(),
+          driverId: driver.driverId,
+          driverName: driver.driverName || '',
+          mobileNumber: driver.mobileNumber,
+          queueType: driver.queueType || 'BOTH',
+          loginTime: fallbackLogin,
+          logoutTime: now,
+          durationMinutes: diffMinutes,
+          status: 'COMPLETED',
+          source,
+          notes: notes || 'Direct logout recorded without prior active session',
+        });
+      }
+    } catch (err) {
+      console.log('Error recording driver logout shift:', err);
+      return null;
+    }
+  }
+
+  async getDriverShifts(driverIdentifier: string, query: any) {
+    try {
+      let driver: DriverDocument | null = null;
+      if (isValidObjectId(driverIdentifier)) {
+        driver = await this.driverModel.findById(driverIdentifier);
+      }
+      if (!driver) {
+        const cleanDigits = String(driverIdentifier).replace(/\D/g, '');
+        const lookupOr: any[] = [
+          { driverId: parseInt(driverIdentifier) || 0 },
+          { mobileNumber: String(driverIdentifier) },
+        ];
+        if (cleanDigits.length >= 7) {
+          lookupOr.push({ mobileNumber: { $regex: cleanDigits, $options: 'i' } });
+        }
+        driver = await this.driverModel.findOne({ $or: lookupOr });
+      }
+
+      if (!driver) {
+        return new ApiResponse(404, {}, Msg.DRIVER_NOT_FOUND);
+      }
+
+      const page = parseInt(query.page) || 1;
+      const limit = parseInt(query.limit) || 20;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {
+        $or: [
+          { driverObjectId: driver._id.toString() },
+          { driverId: driver.driverId },
+          { mobileNumber: driver.mobileNumber },
+        ],
+      };
+
+      if (query.status && query.status.toUpperCase() !== 'ALL') {
+        filter.status = query.status.toUpperCase();
+      }
+
+      const fromParam = query.fromDate || query.startDate || query.from;
+      const toParam = query.toDate || query.endDate || query.to;
+      const singleDate = query.date;
+
+      if (fromParam || toParam || singleDate) {
+        let start: Date | null = null;
+        let end: Date | null = null;
+        if (singleDate) {
+          start = new Date(singleDate);
+          start.setHours(0, 0, 0, 0);
+          end = new Date(singleDate);
+          end.setHours(23, 59, 59, 999);
+        } else {
+          if (fromParam) {
+            const d = new Date(fromParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(0, 0, 0, 0);
+              start = d;
+            }
+          }
+          if (toParam) {
+            const d = new Date(toParam);
+            if (!isNaN(d.getTime())) {
+              d.setHours(23, 59, 59, 999);
+              end = d;
+            }
+          }
+        }
+        if (start && end) {
+          filter.loginTime = { $gte: start, $lte: end };
+        } else if (start) {
+          filter.loginTime = { $gte: start };
+        } else if (end) {
+          filter.loginTime = { $lte: end };
+        }
+      }
+
+      const [total, rawShifts, allCompletedShifts] = await Promise.all([
+        this.driverShiftModel.countDocuments(filter),
+        this.driverShiftModel
+          .find(filter)
+          .sort({ loginTime: -1, createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        this.driverShiftModel
+          .find({
+            $or: [
+              { driverObjectId: driver._id.toString() },
+              { driverId: driver.driverId },
+            ],
+            status: 'COMPLETED',
+          })
+          .select('durationMinutes')
+          .lean(),
+      ]);
+
+      const now = Date.now();
+      const shifts = rawShifts.map((s: any) => {
+        if (s.status === 'ACTIVE' && s.loginTime) {
+          const liveDuration = Math.max(
+            0,
+            Math.round((now - new Date(s.loginTime).getTime()) / 60000),
+          );
+          return { ...s, currentDurationMinutes: liveDuration };
+        }
+        return s;
+      });
+
+      const totalCompletedMinutes = allCompletedShifts.reduce(
+        (sum, item) => sum + (item.durationMinutes || 0),
+        0,
+      );
+
+      const summary = {
+        driverId: driver.driverId,
+        driverName: driver.driverName,
+        mobileNumber: driver.mobileNumber,
+        isLoggedIn: driver.isLoggedIn ?? false,
+        isAvailable: driver.isAvailable ?? false,
+        queueType: driver.queueType ?? 'BOTH',
+        activeRideId: driver.activeRideId ?? null,
+        currentLoginTime: driver.loginTime ?? null,
+        lastLogoutTime: driver.logoutTime ?? null,
+        totalShiftsRecorded: total,
+        totalHoursOnline: parseFloat((totalCompletedMinutes / 60).toFixed(1)),
+      };
+
+      return new ApiResponse(
+        200,
+        {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+          summary,
+          shifts,
+        },
+        Msg.DRIVER_SHIFTS_FETCHED,
+      );
+    } catch (error) {
+      console.log(`Error while fetching driver shift history:`, error);
       return new ApiResponse(500, {}, Msg.SERVER_ERROR);
     }
   }

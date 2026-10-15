@@ -55,6 +55,11 @@ export class IvrDriverActionDto {
   @IsOptional()
   @IsString()
   dtmfInput?: string;
+
+  @ApiProperty({ example: '4', required: false })
+  @IsOptional()
+  @IsString()
+  input?: string;
 }
 
 export class IvrDispatchActionDto {

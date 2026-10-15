@@ -7,6 +7,7 @@ import {
   DriverEarningsAudit,
   DriverEarningsAuditSchema,
 } from './schema/driver-earnings-audit.schema';
+import { DriverShift, DriverShiftSchema } from './schema/driver-shift.schema';
 import { Ride, RideSchema } from '../ride/schema/ride.schema';
 
 @Module({
@@ -14,6 +15,7 @@ import { Ride, RideSchema } from '../ride/schema/ride.schema';
     MongooseModule.forFeature([
       { name: Driver.name, schema: DriverSchema },
       { name: DriverEarningsAudit.name, schema: DriverEarningsAuditSchema },
+      { name: DriverShift.name, schema: DriverShiftSchema },
       { name: Ride.name, schema: RideSchema },
     ]),
   ],

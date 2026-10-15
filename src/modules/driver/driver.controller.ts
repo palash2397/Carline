@@ -150,6 +150,45 @@ export class DriverController {
     return this.driverService.getDriverEarningsHistory(id, query);
   }
 
+  @Get('/:id/shifts')
+  @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of items per page (default: 20)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['ACTIVE', 'COMPLETED', 'ALL'],
+    description: 'Filter by shift status',
+  })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Start date in YYYY-MM-DD or ISO string',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'End date in YYYY-MM-DD or ISO string',
+  })
+  async getDriverShifts(
+    @Param('id') id: string,
+    @Query() query: any,
+  ) {
+    return this.driverService.getDriverShifts(id, query);
+  }
+
   @Get('/:id/earnings-range')
   @Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
   @ApiQuery({

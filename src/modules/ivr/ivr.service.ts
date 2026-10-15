@@ -3,6 +3,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
 import { Driver, DriverDocument } from '../driver/schema/driver.schema';
+import {
+  DriverShift,
+  DriverShiftDocument,
+} from '../driver/schema/driver-shift.schema';
 import { Ride, RideDocument } from '../ride/schema/ride.schema';
 import { User, UserDocument } from '../user/schema/user.schema';
 import { Customer, CustomerDocument } from '../customer/schema/customer.schema';
@@ -23,6 +27,8 @@ import { buildPhoneMatchConditions } from 'src/common/utils/phone-formatter.util
 export class IvrService {
   constructor(
     @InjectModel(Driver.name) private driverModel: Model<DriverDocument>,
+    @InjectModel(DriverShift.name)
+    private driverShiftModel: Model<DriverShiftDocument>,
     @InjectModel(Ride.name) private rideModel: Model<RideDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Customer.name) private customerModel: Model<CustomerDocument>,
@@ -930,7 +936,7 @@ export class IvrService {
         }
       } else {
         const normalizedAction = (dto.action || '').toUpperCase().trim();
-        const input = (dto.dtmfInput || '').trim();
+        const input = (dto.dtmfInput || dto.input || '').trim();
 
         if (!input && !normalizedAction) {
           return new ApiResponse(
@@ -978,10 +984,61 @@ export class IvrService {
           normalizedAction === 'LOGIN' || normalizedAction === 'START';
 
         if (isLogout) {
+          const now = new Date();
           driver.isLoggedIn = false;
           driver.isAvailable = false;
           driver.loginLogout = 'STOP';
+          driver.logoutTime = now.toISOString();
           await driver.save();
+
+          // Close active shift in DriverShift ledger
+          try {
+            const activeShift = await this.driverShiftModel
+              .findOne({
+                driverObjectId: driver._id.toString(),
+                status: 'ACTIVE',
+              })
+              .sort({ loginTime: -1 });
+
+            if (activeShift) {
+              activeShift.logoutTime = now;
+              activeShift.status = 'COMPLETED';
+              const diffMinutes = Math.max(
+                0,
+                Math.round(
+                  (now.getTime() - new Date(activeShift.loginTime).getTime()) /
+                    60000,
+                ),
+              );
+              activeShift.durationMinutes = diffMinutes;
+              activeShift.notes = 'Logged out via IVR (Option 4)';
+              await activeShift.save();
+            } else {
+              const fallbackLogin = driver.loginTime
+                ? new Date(driver.loginTime)
+                : now;
+              const diffMinutes = Math.max(
+                0,
+                Math.round((now.getTime() - fallbackLogin.getTime()) / 60000),
+              );
+              await this.driverShiftModel.create({
+                driverObjectId: driver._id.toString(),
+                driverId: driver.driverId,
+                driverName: driver.driverName || '',
+                mobileNumber: driver.mobileNumber,
+                queueType: driver.queueType || 'BOTH',
+                loginTime: fallbackLogin,
+                logoutTime: now,
+                durationMinutes: diffMinutes,
+                status: 'COMPLETED',
+                source: 'IVR',
+                notes: 'Logged out via IVR (Option 4) without prior active session',
+              });
+            }
+          } catch (shiftErr) {
+            console.error('Failed to close driver shift in IVR logout:', shiftErr);
+          }
+
           return new ApiResponse(
             200,
             {
@@ -992,52 +1049,69 @@ export class IvrService {
             },
             Msg.USER_LOGGED_OUT,
           );
-        } else if (isLoginLocal) {
+        } else if (isLoginLocal || isLoginLongDistance || isLoginBoth || isGenericLogin) {
+          const selectedQueue = isLoginLocal
+            ? 'LOCAL'
+            : isLoginLongDistance
+              ? 'LONG_DISTANCE'
+              : 'BOTH';
+
+          const assignQueueName =
+            selectedQueue === 'LOCAL'
+              ? 'Local_Rides'
+              : selectedQueue === 'LONG_DISTANCE'
+                ? 'Long_Distance_Ride'
+                : 'BOTH';
+
+          const now = new Date();
           driver.isLoggedIn = true;
           driver.isAvailable = true;
-          driver.queueType = 'LOCAL';
-          driver.assignQueue = 'Local_Rides';
+          driver.queueType = selectedQueue;
+          driver.assignQueue = assignQueueName;
           driver.loginLogout = 'START';
+          driver.loginTime = now.toISOString();
           await driver.save();
+
+          // Record active shift in DriverShift ledger
+          try {
+            // Close any previous dangling active shifts
+            const danglingShifts = await this.driverShiftModel.find({
+              driverObjectId: driver._id.toString(),
+              status: 'ACTIVE',
+            });
+            for (const ds of danglingShifts) {
+              ds.logoutTime = now;
+              ds.status = 'COMPLETED';
+              ds.durationMinutes = Math.max(
+                0,
+                Math.round(
+                  (now.getTime() - new Date(ds.loginTime).getTime()) / 60000,
+                ),
+              );
+              ds.notes = 'Closed automatically upon new IVR login';
+              await ds.save();
+            }
+
+            await this.driverShiftModel.create({
+              driverObjectId: driver._id.toString(),
+              driverId: driver.driverId,
+              driverName: driver.driverName || '',
+              mobileNumber: driver.mobileNumber,
+              queueType: selectedQueue,
+              loginTime: now,
+              status: 'ACTIVE',
+              source: 'IVR',
+              notes: `Logged in via IVR (${selectedQueue})`,
+            });
+          } catch (shiftErr) {
+            console.error('Failed to create driver shift in IVR login:', shiftErr);
+          }
+
           return new ApiResponse(
             200,
             {
               action: 'SAY_LOGGED_IN',
-              queueType: 'LOCAL',
-              workflowStage: 'LOGGED_IN',
-              isLoggedIn: true,
-            },
-            Msg.USER_LOGIN,
-          );
-        } else if (isLoginLongDistance) {
-          driver.isLoggedIn = true;
-          driver.isAvailable = true;
-          driver.queueType = 'LONG_DISTANCE';
-          driver.assignQueue = 'Long_Distance_Ride';
-          driver.loginLogout = 'START';
-          await driver.save();
-          return new ApiResponse(
-            200,
-            {
-              action: 'SAY_LOGGED_IN',
-              queueType: 'LONG_DISTANCE',
-              workflowStage: 'LOGGED_IN',
-              isLoggedIn: true,
-            },
-            Msg.USER_LOGIN,
-          );
-        } else if (isLoginBoth || isGenericLogin) {
-          driver.isLoggedIn = true;
-          driver.isAvailable = true;
-          driver.queueType = 'BOTH';
-          driver.assignQueue = 'BOTH';
-          driver.loginLogout = 'START';
-          await driver.save();
-          return new ApiResponse(
-            200,
-            {
-              action: 'SAY_LOGGED_IN',
-              queueType: 'BOTH',
+              queueType: selectedQueue,
               workflowStage: 'LOGGED_IN',
               isLoggedIn: true,
             },
