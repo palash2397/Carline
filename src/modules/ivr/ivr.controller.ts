@@ -1,4 +1,4 @@
-import {
+﻿import {
   Body,
   Controller,
   Post,
@@ -59,5 +59,24 @@ export class IvrController {
   @Get('/customer/status/:number')
   async getCustomerStatus(@Param('number') number: string) {
     return this.ivrService.getCustomerStatus(number);
+  }
+
+  @Get('/driver/settlement/:number')
+  async getDriverSettlement(
+    @Param('number') number: string,
+    @Query() query?: any,
+  ) {
+    return this.ivrService.getDriverSettlement(number, query);
+  }
+
+  @Post('/driver/settlement')
+  async postDriverSettlement(
+    @Body('callerNumber') callerNumber?: string,
+    @Body('driverNumber') driverNumber?: string,
+    @Body('number') number?: string,
+    @Query() query?: any,
+  ) {
+    const phone = callerNumber || driverNumber || number || '';
+    return this.ivrService.getDriverSettlement(phone, query);
   }
 }

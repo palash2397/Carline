@@ -22,6 +22,7 @@ import { Msg } from 'src/helpers/responseMsg';
 import { PricingService } from '../pricing/pricing.service';
 import { PaymentService } from '../payment/payment.service';
 import { buildPhoneMatchConditions } from 'src/common/utils/phone-formatter.util';
+import { parseDateTimeRange } from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class IvrService {
@@ -983,7 +984,16 @@ export class IvrService {
         const isGenericLogin =
           normalizedAction === 'LOGIN' || normalizedAction === 'START';
 
-        if (isLogout) {
+        const isEarningsSettlement =
+          input === '5' ||
+          normalizedAction === 'EARNINGS' ||
+          normalizedAction === 'SETTLEMENT' ||
+          normalizedAction === 'EARNINGS_SETTLEMENT' ||
+          normalizedAction === 'GET_EARNINGS';
+
+        if (isEarningsSettlement) {
+          return this.getDriverSettlement(callerNumber);
+        } else if (isLogout) {
           const now = new Date();
           driver.isLoggedIn = false;
           driver.isAvailable = false;
@@ -2516,4 +2526,274 @@ export class IvrService {
       // Timeout prevents event-loop hanging when endpoint is not configured.
     }
   }
+
+
+  async getDriverSettlement(mobileNumber: string, query: any = {}) {
+    try {
+      if (!mobileNumber || !mobileNumber.trim()) {
+        return new ApiResponse(400, {}, Msg.IVR_MOBILE_NUMBER_REQUIRED);
+      }
+
+      const driver = await this.findDriverByPhoneNumber(mobileNumber.trim());
+
+      if (!driver) {
+        return new ApiResponse(
+          404,
+          {
+            registered: false,
+            speechText: 'Driver not found for the provided phone number.',
+          },
+          Msg.DRIVER_NOT_FOUND,
+        );
+      }
+
+      if (this.isDriverBlocked(driver)) {
+        return new ApiResponse(
+          403,
+          {
+            registered: true,
+            driverId: driver.driverId || driver._id,
+            driverName: driver.driverName,
+            status: driver.status || 'Block',
+            lockedOut: true,
+            speechText:
+              'Driver account is locked out or inactive. Please contact dispatch.',
+          },
+          Msg.IVR_DRIVER_ACCOUNT_INACTIVE,
+        );
+      }
+
+      const numberDigits = (driver.mobileNumber || '').replace(/\D/g, '');
+      const driverMatchConditions: any[] = [
+        { driverId: driver._id.toString() },
+        { driverNumber: driver.mobileNumber },
+      ];
+      if (driver.driverId) {
+        driverMatchConditions.push({ driverId: String(driver.driverId) });
+      }
+      if (numberDigits && numberDigits.length >= 7) {
+        driverMatchConditions.push({
+          driverNumber: { $regex: numberDigits, $options: 'i' },
+        });
+      }
+      if (driver.driverName) {
+        driverMatchConditions.push({
+          driverName: { $regex: `^${driver.driverName.trim()}$`, $options: 'i' },
+        });
+        const cleanName = driver.driverName.replace(/[^\x00-\x7F]/g, '').trim();
+        const dWords = (cleanName || driver.driverName)
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
+        if (dWords.length > 1) {
+          const wRegex = dWords
+            .slice(0, 2)
+            .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*');
+          driverMatchConditions.push({
+            driverName: { $regex: wRegex, $options: 'i' },
+          });
+        }
+      }
+
+      const rideQuery: any = {
+        $or: driverMatchConditions,
+        rideStatus: { $in: [RideStatus.COMPLETED, 'COMPLETED'] },
+      };
+
+      const dateRange = parseDateTimeRange(query);
+      const startDate = dateRange.startDate;
+      const endDate = dateRange.endDate;
+
+      if (startDate || endDate) {
+        const dateCond: any = {};
+        if (startDate) dateCond.$gte = startDate;
+        if (endDate) dateCond.$lte = endDate;
+
+        const orDateList: any[] = [{ createdAt: dateCond }];
+        if (startDate) {
+          orDateList.push({
+            rideCompleteDateTime: {
+              $gte: startDate.toISOString(),
+              ...(endDate ? { $lte: endDate.toISOString() } : {}),
+            },
+          });
+        }
+        rideQuery.$and = [{ $or: orDateList }];
+      }
+
+      const completedRides = await this.rideModel
+        .find(rideQuery)
+        .sort({ createdAt: -1, rideCompleteDateTime: -1 })
+        .lean()
+        .exec();
+
+      let totalFares = 0;
+      let totalCash = 0;
+      let totalCreditCard = 0;
+      let totalAccount = 0;
+      let cashTripsCount = 0;
+      let creditCardTripsCount = 0;
+      let accountTripsCount = 0;
+
+      const commissionPercentage =
+        driver.commissionPercentage !== undefined &&
+        driver.commissionPercentage !== null
+          ? Number(driver.commissionPercentage)
+          : 30;
+      const driverSharePercentage = Number(
+        (100 - commissionPercentage).toFixed(2),
+      );
+
+      completedRides.forEach((ride: any) => {
+        const fare = Number((ride.rideAmount || 0).toFixed(2));
+        totalFares += fare;
+
+        const payment = String(
+          ride.paymentType || ride.payment || 'CASH',
+        ).toUpperCase();
+
+        if (payment === 'CASH') {
+          totalCash += fare;
+          cashTripsCount++;
+        } else if (
+          payment === 'CARD' ||
+          payment === 'CREDIT_CARD' ||
+          payment === 'STRIPE'
+        ) {
+          totalCreditCard += fare;
+          creditCardTripsCount++;
+        } else if (
+          payment === 'ACCOUNT' ||
+          payment === 'CUSTOMER_ACCOUNT' ||
+          payment === 'SAVED_CARD'
+        ) {
+          totalAccount += fare;
+          accountTripsCount++;
+        } else {
+          totalCreditCard += fare;
+          creditCardTripsCount++;
+        }
+      });
+
+      totalFares = Number(totalFares.toFixed(2));
+      totalCash = Number(totalCash.toFixed(2));
+      totalCreditCard = Number(totalCreditCard.toFixed(2));
+      totalAccount = Number(totalAccount.toFixed(2));
+
+      const driverTotalEarnings = Number(
+        (totalFares * (driverSharePercentage / 100)).toFixed(2),
+      );
+      const companyTotalCommission = Number(
+        (totalFares * (commissionPercentage / 100)).toFixed(2),
+      );
+
+      // 1. Driver collected cash -> Driver owes company commission on cash trips
+      const companyShareOfCash = Number(
+        (totalCash * (commissionPercentage / 100)).toFixed(2),
+      );
+
+      // 2. Company collected non-cash (Credit Card + Customer Account) -> Company owes driver share
+      const nonCashTotal = Number((totalCreditCard + totalAccount).toFixed(2));
+      const driverShareOfNonCash = Number(
+        (nonCashTotal * (driverSharePercentage / 100)).toFixed(2),
+      );
+
+      // Net Balance = (Company Share of Cash) - (Driver Share of Non-Cash)
+      const netBalance = Number(
+        (companyShareOfCash - driverShareOfNonCash).toFixed(2),
+      );
+
+      let settlementStatus = 'SETTLED';
+      let amountDriverOwesCompany = 0;
+      let amountCompanyOwesDriver = 0;
+      let whoOwes = 'SETTLED';
+      let exactAmountOwed = 0;
+      let summaryText = 'Accounts are fully settled ($0.00)';
+      let settlementSpeech = 'Your account is fully settled with zero balance.';
+
+      if (netBalance > 0) {
+        settlementStatus = 'DRIVER_OWES_COMPANY';
+        whoOwes = 'DRIVER_OWES_COMPANY';
+        amountDriverOwesCompany = netBalance;
+        exactAmountOwed = netBalance;
+        summaryText = `Driver owes company $${netBalance.toFixed(2)}`;
+        settlementSpeech = `You owe the company $${netBalance.toFixed(2)}.`;
+      } else if (netBalance < 0) {
+        settlementStatus = 'COMPANY_OWES_DRIVER';
+        whoOwes = 'COMPANY_OWES_DRIVER';
+        amountCompanyOwesDriver = Number(Math.abs(netBalance).toFixed(2));
+        exactAmountOwed = amountCompanyOwesDriver;
+        summaryText = `Company owes driver $${amountCompanyOwesDriver.toFixed(2)}`;
+        settlementSpeech = `The company owes you $${amountCompanyOwesDriver.toFixed(2)}.`;
+      }
+
+      const speechText = [
+        'Here is your earnings and settlement summary.',
+        `Total cash collections: $${totalCash.toFixed(2)} from ${cashTripsCount} trips.`,
+        `Total credit card payments: $${totalCreditCard.toFixed(2)} from ${creditCardTripsCount} trips.`,
+        `Total account payments: $${totalAccount.toFixed(2)} from ${accountTripsCount} trips.`,
+        `Total driver earnings: $${driverTotalEarnings.toFixed(2)}, based on your driver share of ${driverSharePercentage} percent.`,
+        `Company commission: $${companyTotalCommission.toFixed(2)}, based on company commission of ${commissionPercentage} percent.`,
+        `Current settlement balance: ${settlementSpeech}`,
+      ].join(' ');
+
+      return new ApiResponse(
+        200,
+        {
+          action: 'SAY_EARNINGS_AND_SETTLEMENT',
+          driver: {
+            _id: driver._id,
+            driverId: driver.driverId,
+            driverName: driver.driverName,
+            mobileNumber: driver.mobileNumber,
+            commissionPercentage,
+            driverSharePercentage,
+          },
+          period: {
+            fromDate: query?.fromDate || null,
+            fromTime: query?.fromTime || null,
+            toDate: query?.toDate || null,
+            toTime: query?.toTime || null,
+            startDate: startDate ? startDate.toISOString() : null,
+            endDate: endDate ? endDate.toISOString() : null,
+            filterApplied: Boolean(startDate || endDate),
+          },
+          speechText,
+          financialTotals: {
+            totalTripsCount: completedRides.length,
+            cashTripsCount,
+            creditCardTripsCount,
+            accountTripsCount,
+            totalFares,
+            totalCash,
+            totalCreditCard,
+            totalAccount,
+            driverSharePercentage,
+            driverTotalEarnings,
+            commissionPercentage,
+            companyTotalCommission,
+          },
+          settlement: {
+            cashCollectedByDriver: totalCash,
+            companyShareOfCash,
+            nonCashCollectedByCompany: nonCashTotal,
+            driverShareOfNonCash,
+            netBalance,
+            settlementStatus,
+            whoOwes,
+            amountDriverOwesCompany,
+            amountCompanyOwesDriver,
+            exactAmountOwed,
+            summaryText,
+            settlementSpeech,
+          },
+        },
+        'Driver earnings and settlement fetched successfully',
+      );
+    } catch (error) {
+      console.error('Error in getDriverSettlement:', error);
+      return new ApiResponse(500, {}, Msg.SERVER_ERROR);
+    }
+  }
+
 }
