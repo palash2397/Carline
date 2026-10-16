@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Post,
@@ -7,7 +7,7 @@
   Query,
   Param,
 } from '@nestjs/common';
-import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { IvrDispatchActionDto, IvrDriverActionDto } from './dto/ivr-action.dto';
 import { IvrDriverCardDto } from './dto/ivr-driver-card.dto';
@@ -62,6 +62,24 @@ export class IvrController {
   }
 
   @Get('/driver/settlement/:number')
+  @ApiQuery({
+    name: 'week',
+    required: false,
+    enum: ['current', 'last', 'previous'],
+    description: 'Weekly filter (defaults to current week: Sunday to Saturday)',
+  })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Custom range start date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Custom range end date (YYYY-MM-DD)',
+  })
   async getDriverSettlement(
     @Param('number') number: string,
     @Query() query?: any,
@@ -70,6 +88,24 @@ export class IvrController {
   }
 
   @Post('/driver/settlement')
+  @ApiQuery({
+    name: 'week',
+    required: false,
+    enum: ['current', 'last', 'previous'],
+    description: 'Weekly filter (defaults to current week: Sunday to Saturday)',
+  })
+  @ApiQuery({
+    name: 'fromDate',
+    required: false,
+    type: String,
+    description: 'Custom range start date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'toDate',
+    required: false,
+    type: String,
+    description: 'Custom range end date (YYYY-MM-DD)',
+  })
   async postDriverSettlement(
     @Body('callerNumber') callerNumber?: string,
     @Body('driverNumber') driverNumber?: string,

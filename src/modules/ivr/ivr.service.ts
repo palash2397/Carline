@@ -22,7 +22,10 @@ import { Msg } from 'src/helpers/responseMsg';
 import { PricingService } from '../pricing/pricing.service';
 import { PaymentService } from '../payment/payment.service';
 import { buildPhoneMatchConditions } from 'src/common/utils/phone-formatter.util';
-import { parseDateTimeRange } from 'src/common/utils/date-range.util';
+import {
+  parseDateTimeRange,
+  getWeeklyDateRange,
+} from 'src/common/utils/date-range.util';
 
 @Injectable()
 export class IvrService {
@@ -2601,8 +2604,20 @@ export class IvrService {
       };
 
       const dateRange = parseDateTimeRange(query);
-      const startDate = dateRange.startDate;
-      const endDate = dateRange.endDate;
+      let isWeekly = false;
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
+
+      if (dateRange.hasFilter && (dateRange.startDate || dateRange.endDate)) {
+        startDate = dateRange.startDate;
+        endDate = dateRange.endDate;
+      } else {
+        // Default to weekly data (not overall) for IVR driver settlement
+        isWeekly = true;
+        const weekly = getWeeklyDateRange({ week: query?.week });
+        startDate = weekly.startDate;
+        endDate = weekly.endDate;
+      }
 
       if (startDate || endDate) {
         const dateCond: any = {};
@@ -2727,8 +2742,12 @@ export class IvrService {
         settlementSpeech = `The company owes you $${amountCompanyOwesDriver.toFixed(2)}.`;
       }
 
+      const introText = isWeekly
+        ? 'Here is your weekly earnings and settlement summary.'
+        : 'Here is your earnings and settlement summary.';
+
       const speechText = [
-        'Here is your earnings and settlement summary.',
+        introText,
         `Total cash collections: $${totalCash.toFixed(2)} from ${cashTripsCount} trips.`,
         `Total credit card payments: $${totalCreditCard.toFixed(2)} from ${creditCardTripsCount} trips.`,
         `Total account payments: $${totalAccount.toFixed(2)} from ${accountTripsCount} trips.`,
@@ -2750,9 +2769,15 @@ export class IvrService {
             driverSharePercentage,
           },
           period: {
-            fromDate: query?.fromDate || null,
+            scope: isWeekly ? 'WEEKLY' : 'CUSTOM',
+            week: isWeekly ? (query?.week || 'current') : undefined,
+            fromDate:
+              query?.fromDate ||
+              (startDate ? startDate.toISOString().slice(0, 10) : null),
             fromTime: query?.fromTime || null,
-            toDate: query?.toDate || null,
+            toDate:
+              query?.toDate ||
+              (endDate ? endDate.toISOString().slice(0, 10) : null),
             toTime: query?.toTime || null,
             startDate: startDate ? startDate.toISOString() : null,
             endDate: endDate ? endDate.toISOString() : null,

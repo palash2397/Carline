@@ -130,3 +130,78 @@ export function parseDateTimeRange(
     filter,
   };
 }
+
+export interface WeeklyRangeResult {
+  startDate: Date;
+  endDate: Date;
+  fromDateStr: string;
+  toDateStr: string;
+}
+
+export function getWeeklyDateRange(
+  options: {
+    week?: 'current' | 'last' | 'previous' | string;
+    baseDate?: Date;
+    timeZone?: string;
+  } = {},
+): WeeklyRangeResult {
+  const timeZone = options.timeZone || process.env.TIMEZONE || 'America/New_York';
+  const baseDate = options.baseDate || new Date();
+
+  let weekdayStr = 'Sun';
+  let month = baseDate.getUTCMonth() + 1;
+  let day = baseDate.getUTCDate();
+  let year = baseDate.getUTCFullYear();
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+    }).formatToParts(baseDate);
+
+    const getVal = (t: string) => parts.find((p) => p.type === t)?.value || '';
+    weekdayStr = getVal('weekday') || weekdayStr;
+    const m = parseInt(getVal('month'), 10);
+    const d = parseInt(getVal('day'), 10);
+    const y = parseInt(getVal('year'), 10);
+    if (!isNaN(m)) month = m;
+    if (!isNaN(d)) day = d;
+    if (!isNaN(y)) year = y;
+  } catch (e) {
+    // Fallback if Intl fails
+  }
+
+  const dayOfWeekMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  const dayIndex = dayOfWeekMap[weekdayStr] ?? 0;
+  const isPastWeek = options.week === 'last' || options.week === 'previous';
+  const offsetDays = isPastWeek ? 7 : 0;
+
+  // Sunday is start of week (day 0)
+  const sundayUtc = new Date(Date.UTC(year, month - 1, day - dayIndex - offsetDays));
+  const saturdayUtc = new Date(Date.UTC(year, month - 1, day - dayIndex - offsetDays + 6));
+
+  const fromDateStr = sundayUtc.toISOString().slice(0, 10);
+  const toDateStr = saturdayUtc.toISOString().slice(0, 10);
+
+  const parsed = parseDateTimeRange({ fromDate: fromDateStr, toDate: toDateStr });
+
+  return {
+    startDate: parsed.startDate!,
+    endDate: parsed.endDate!,
+    fromDateStr,
+    toDateStr,
+  };
+}
+
